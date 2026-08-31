@@ -4,6 +4,7 @@ mod editor;
 mod fsutil;
 mod tree;
 mod ui;
+mod wrap;
 
 use std::env;
 use std::io;
