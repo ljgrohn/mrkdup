@@ -115,6 +115,26 @@ impl Tree {
             .unwrap_or(0);
     }
 
+    /// Re-root the tree at the selected directory (or, for a file, its
+    /// parent directory). Inverse of `ascend`.
+    pub fn make_root(&mut self) {
+        let Some(row) = self.selected_row() else { return };
+        let new_root = if row.is_dir {
+            row.path.clone()
+        } else {
+            match row.path.parent() {
+                Some(p) => p.to_path_buf(),
+                None => return,
+            }
+        };
+        if new_root == self.root {
+            return;
+        }
+        self.root = new_root;
+        self.selected = 0;
+        self.rebuild();
+    }
+
     pub fn toggle_hidden(&mut self) {
         self.show_hidden = !self.show_hidden;
         self.rebuild_keeping_selection();
@@ -297,6 +317,27 @@ mod tests {
         assert!(t.rows().iter().any(|r| r.path == canon.join("b-dir/inner.md")));
         // and the tree is rooted one level up now
         assert_eq!(t.root(), canon.parent().unwrap());
+    }
+
+    #[test]
+    fn make_root_on_dir_reroots_there() {
+        let root = fixture("mkroot");
+        let mut t = Tree::new(root.clone()).unwrap();
+        t.make_root(); // selection starts on b-dir
+        assert_eq!(t.root(), root.canonicalize().unwrap().join("b-dir"));
+        assert_eq!(names(&t), vec!["inner.md"]);
+        assert_eq!(t.selected(), 0);
+    }
+
+    #[test]
+    fn make_root_on_file_reroots_at_its_parent() {
+        let root = fixture("mkroot-file");
+        let mut t = Tree::new(root.clone()).unwrap();
+        t.expand();
+        t.move_down(); // inner.md
+        t.make_root();
+        assert_eq!(t.root(), root.canonicalize().unwrap().join("b-dir"));
+        assert_eq!(names(&t), vec!["inner.md"]);
     }
 
     #[test]

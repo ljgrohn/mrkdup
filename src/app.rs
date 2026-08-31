@@ -110,6 +110,7 @@ impl App {
             KeyCode::Char('G') => self.tree.move_bottom(),
             KeyCode::Char('.') => self.tree.toggle_hidden(),
             KeyCode::Char('-') => self.tree.ascend(),
+            KeyCode::Char('+') => self.tree.make_root(),
             KeyCode::Char('n') => self.prompt = Prompt::NewFile(String::new()),
             KeyCode::Enter | KeyCode::Tab => self.open_selected(),
             _ => {}
@@ -157,7 +158,8 @@ impl App {
     fn editor_key(&mut self, key: KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match (ctrl, key.code) {
-            (false, KeyCode::Esc) => self.focus = Focus::Tree,
+            // Shift+Tab arrives as BackTab; treat it like Esc
+            (false, KeyCode::Esc) | (_, KeyCode::BackTab) => self.focus = Focus::Tree,
             (true, KeyCode::Char('s')) => self.do_save(),
             (true, KeyCode::Char('f')) => self.prompt = Prompt::Search(String::new()),
             // crate defaults are Ctrl+U/Ctrl+R with Ctrl+Y = paste;
@@ -468,6 +470,27 @@ mod tests {
             app.tree.selected_row().unwrap().path,
             root.canonicalize().unwrap()
         );
+    }
+
+    #[test]
+    fn shift_tab_in_editor_returns_to_tree_without_typing() {
+        let mut app = App::new(fixture("backtab")).unwrap();
+        app.handle_key(key(KeyCode::Enter)); // open a.md
+        app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+        assert!(matches!(app.focus, Focus::Tree));
+        assert_eq!(app.editor.textarea.lines(), ["hello", "world"]); // unchanged
+        assert!(!app.editor.dirty);
+    }
+
+    #[test]
+    fn plus_makes_selected_folder_the_root() {
+        let root = fixture("mkroot");
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::write(root.join("docs/x.md"), "x\n").unwrap();
+        let mut app = App::new(root.clone()).unwrap();
+        // docs/ sorts first (dirs before files), so it's already selected
+        app.handle_key(KeyEvent::new(KeyCode::Char('+'), KeyModifiers::SHIFT));
+        assert_eq!(app.tree.root(), root.canonicalize().unwrap().join("docs"));
     }
 
     #[test]

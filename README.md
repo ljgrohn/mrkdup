@@ -28,13 +28,14 @@ markdup [directory]   # defaults to the current directory
 |---|---|---|
 | global | Ctrl+B | show/hide tree pane |
 | global | Ctrl+Q | quit (autosaves; if disk changed, warns — Ctrl+Q again discards) |
-| editor | Esc | focus tree |
+| editor | Esc / Shift+Tab | focus tree |
 | tree | Enter / Tab | open file (or expand/collapse dir) |
 | tree | j/k, ↑/↓ | move selection |
 | tree | h/l, ←/→ | collapse / expand |
 | tree | g / G | jump to top / bottom |
 | tree | n | new file (prompt; `dir/name.md` paths allowed) |
 | tree | - | go up: re-root the tree at the parent directory |
+| tree | + | zoom in: make the selected folder the tree root (a file: its folder) |
 | tree | . | toggle hidden files |
 | editor | Ctrl+S | save (after a disk-conflict warning, a second Ctrl+S overwrites) |
 | editor | Ctrl+Z / Ctrl+Y | undo / redo |

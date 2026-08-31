@@ -49,13 +49,14 @@ a thin, fast wrapper around plain files.
 |---|---|---|
 | global | Ctrl+B | show/hide tree pane |
 | global | Ctrl+Q | quit (autosaves first) |
-| editor | Esc | focus tree |
+| editor | Esc / Shift+Tab | focus tree |
 | tree | Enter / Tab | open selected file, focus editor |
 | tree | j/k, ↑/↓ | move selection |
 | tree | h/l, ←/→ | collapse / expand directory |
 | tree | g / G | jump to top / bottom |
 | tree | n | new file |
 | tree | - | re-root tree at the parent directory (climb above launch dir) |
+| tree | + | re-root tree at the selected folder (a file: its folder) |
 | tree | . | toggle hidden files |
 | editor | (typing) | insert text; Tab inserts indentation |
 | editor | Ctrl+S | save (second press forces past a conflict) |
