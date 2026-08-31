@@ -365,6 +365,14 @@ impl App {
             (true, KeyCode::Char('s')) => self.do_save(),
             (true, KeyCode::Char('f')) => self.prompt = Prompt::Search(String::new()),
             (true, KeyCode::Char('d')) => self.toggle_checkbox(),
+            // crate defaults make Ctrl+K kill-to-end-of-line; we use
+            // Ctrl+J/Ctrl+K as word motions instead
+            (true, KeyCode::Char('j')) => {
+                self.editor.textarea.move_cursor(CursorMove::WordForward);
+            }
+            (true, KeyCode::Char('k')) => {
+                self.editor.textarea.move_cursor(CursorMove::WordBack);
+            }
             (true, KeyCode::Char('g')) => {
                 if self.last_search.is_empty() {
                     self.status = Some("no previous search (Ctrl+F to search)".into());
@@ -1146,6 +1154,25 @@ mod tests {
             app.handle_key(key(KeyCode::Char(c)));
         }
         assert_eq!(app.editor.textarea.lines()[0], "---0hello");
+    }
+
+    #[test]
+    fn ctrl_jk_move_by_word_without_deleting() {
+        let root = fixture("word-motion");
+        fs::write(root.join("a.md"), "alpha bravo charlie\n").unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(ctrl('j'));
+        let DataCursor(_, col1) = app.editor.textarea.cursor();
+        assert!(col1 > 0); // advanced
+        app.handle_key(ctrl('j'));
+        let DataCursor(_, col2) = app.editor.textarea.cursor();
+        assert!(col2 > col1);
+        app.handle_key(ctrl('k'));
+        assert_eq!(app.editor.textarea.cursor(), (0, col1));
+        // nothing was deleted (Ctrl+K used to be kill-to-end-of-line)
+        assert_eq!(app.editor.textarea.lines()[0], "alpha bravo charlie");
+        assert!(!app.editor.dirty);
     }
 
     #[test]
