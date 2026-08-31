@@ -55,6 +55,7 @@ a thin, fast wrapper around plain files.
 | tree | h/l, ←/→ | collapse / expand directory |
 | tree | g / G | jump to top / bottom |
 | tree | n | new file |
+| tree | - | re-root tree at the parent directory (climb above launch dir) |
 | tree | . | toggle hidden files |
 | editor | (typing) | insert text; Tab inserts indentation |
 | editor | Ctrl+S | save (second press forces past a conflict) |

@@ -1,11 +1,19 @@
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 use ratatui_textarea::DataCursor;
 
 use crate::app::{App, Focus, Prompt};
+
+fn border_style(focused: bool) -> Style {
+    if focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().add_modifier(Modifier::DIM)
+    }
+}
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let [main, status] =
@@ -30,7 +38,11 @@ fn draw_tree(f: &mut Frame, app: &mut App, area: Rect) {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "/".into());
-    let block = Block::default().borders(Borders::ALL).title(root_name);
+    let tree_focused = matches!(app.focus, Focus::Tree);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style(tree_focused))
+        .title(root_name);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -42,7 +54,6 @@ fn draw_tree(f: &mut Frame, app: &mut App, area: Rect) {
         app.tree_scroll = selected + 1 - height;
     }
 
-    let tree_focused = matches!(app.focus, Focus::Tree);
     let lines: Vec<Line> = app
         .tree
         .rows()
@@ -77,16 +88,30 @@ fn draw_tree(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
-    let block = Block::default().borders(Borders::ALL);
+    let focused = matches!(app.focus, Focus::Editor);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style(focused));
     let inner = block.inner(area);
     f.render_widget(block, area);
+    // hide the block cursor while the tree has focus
+    let cursor_style = if focused {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default()
+    };
+    app.editor.textarea.set_cursor_style(cursor_style);
     f.render_widget(&app.editor.textarea, inner);
 }
 
 fn draw_status(f: &mut Frame, app: &App, area: Rect) {
+    let mode = match app.focus {
+        Focus::Tree => " TREE ",
+        Focus::Editor => " EDIT ",
+    };
     let text = match &app.prompt {
-        Prompt::NewFile(s) => format!("new file: {s}"),
-        Prompt::Search(s) => format!("search: {s}"),
+        Prompt::NewFile(s) => format!("{mode}| new file: {s}"),
+        Prompt::Search(s) => format!("{mode}| search: {s}"),
         Prompt::None => {
             let path = app
                 .editor
@@ -101,7 +126,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
                 .unwrap_or_else(|| "[no file]".into());
             let dirty = if app.editor.dirty { "*" } else { "" };
             let DataCursor(row, col) = app.editor.textarea.cursor();
-            let mut s = format!("{path}{dirty}  {}:{}", row + 1, col + 1);
+            let mut s = format!("{mode}| {path}{dirty}  {}:{}", row + 1, col + 1);
             if let Some(msg) = &app.status {
                 s.push_str("  —  ");
                 s.push_str(msg);
@@ -140,5 +165,15 @@ mod tests {
         assert!(text.contains("a.md")); // tree row
         assert!(text.contains("one two")); // editor content
         assert!(text.contains("1:1")); // status bar cursor
+        assert!(text.contains("EDIT")); // focus tag after opening a file
+
+        // back to the tree: tag flips
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Esc,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let text = format!("{:?}", terminal.backend().buffer());
+        assert!(text.contains("TREE"));
     }
 }

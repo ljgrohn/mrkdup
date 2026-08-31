@@ -6,7 +6,9 @@ plain files — it autosaves, writes atomically, and picks up external
 changes without clobbering yours.
 
 The tree shows directories and any text-based file (detected by content,
-not extension), honors `.gitignore`, and lazy-loads as you expand.
+not extension), honors `.gitignore`, and lazy-loads as you expand. Press
+`-` to climb above the directory you launched in. The focused pane has a
+cyan border, and the status bar shows `TREE` or `EDIT`.
 
 ## Install
 
@@ -32,6 +34,7 @@ markdup [directory]   # defaults to the current directory
 | tree | h/l, ←/→ | collapse / expand |
 | tree | g / G | jump to top / bottom |
 | tree | n | new file (prompt; `dir/name.md` paths allowed) |
+| tree | - | go up: re-root the tree at the parent directory |
 | tree | . | toggle hidden files |
 | editor | Ctrl+S | save (after a disk-conflict warning, a second Ctrl+S overwrites) |
 | editor | Ctrl+Z / Ctrl+Y | undo / redo |

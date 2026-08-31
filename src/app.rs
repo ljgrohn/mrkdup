@@ -109,6 +109,7 @@ impl App {
             KeyCode::Char('g') => self.tree.move_top(),
             KeyCode::Char('G') => self.tree.move_bottom(),
             KeyCode::Char('.') => self.tree.toggle_hidden(),
+            KeyCode::Char('-') => self.tree.ascend(),
             KeyCode::Char('n') => self.prompt = Prompt::NewFile(String::new()),
             KeyCode::Enter | KeyCode::Tab => self.open_selected(),
             _ => {}
@@ -452,6 +453,21 @@ mod tests {
         app.handle_key(ctrl('f'));
         app.handle_key(key(KeyCode::Enter)); // empty -> repeat "l"
         assert_eq!(app.editor.textarea.cursor(), (0, 3));
+    }
+
+    #[test]
+    fn dash_reroots_tree_at_parent() {
+        let root = fixture("ascend");
+        let mut app = App::new(root.clone()).unwrap();
+        app.handle_key(key(KeyCode::Char('-')));
+        assert_eq!(
+            app.tree.root(),
+            root.canonicalize().unwrap().parent().unwrap()
+        );
+        assert_eq!(
+            app.tree.selected_row().unwrap().path,
+            root.canonicalize().unwrap()
+        );
     }
 
     #[test]

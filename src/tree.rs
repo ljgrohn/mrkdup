@@ -100,6 +100,21 @@ impl Tree {
         }
     }
 
+    /// Re-root the tree at the parent directory. The old root stays
+    /// visible as an expanded, selected row so you keep your place.
+    /// No-op at the filesystem root.
+    pub fn ascend(&mut self) {
+        let Some(parent) = self.root.parent().map(|p| p.to_path_buf()) else { return };
+        let old_root = std::mem::replace(&mut self.root, parent);
+        self.expanded.insert(old_root.clone());
+        self.rebuild();
+        self.selected = self
+            .rows
+            .iter()
+            .position(|r| r.path == old_root)
+            .unwrap_or(0);
+    }
+
     pub fn toggle_hidden(&mut self) {
         self.show_hidden = !self.show_hidden;
         self.rebuild_keeping_selection();
@@ -264,6 +279,32 @@ mod tests {
         fs::write(root.join("b-dir/new.md"), "n\n").unwrap();
         t.refresh();
         assert_eq!(names(&t), vec!["b-dir", "inner.md", "new.md", "a.md", "zz.md"]);
+    }
+
+    #[test]
+    fn ascend_reroots_at_parent_keeping_place() {
+        let root = fixture("asc");
+        let mut t = Tree::new(root.clone()).unwrap();
+        t.expand(); // expand b-dir so we can check state survives
+        t.ascend();
+        let canon = root.canonicalize().unwrap();
+        // old root is now a visible, expanded, selected row...
+        let sel = t.selected_row().unwrap();
+        assert_eq!(sel.path, canon);
+        assert!(sel.is_dir && sel.expanded);
+        // ...its children (and the previously expanded subdir's) still show
+        assert!(t.rows().iter().any(|r| r.path == canon.join("a.md")));
+        assert!(t.rows().iter().any(|r| r.path == canon.join("b-dir/inner.md")));
+        // and the tree is rooted one level up now
+        assert_eq!(t.root(), canon.parent().unwrap());
+    }
+
+    #[test]
+    fn ascend_at_filesystem_root_is_noop() {
+        let mut t = Tree::new(PathBuf::from("/")).unwrap();
+        let before = t.root().to_path_buf();
+        t.ascend();
+        assert_eq!(t.root(), before);
     }
 
     #[test]
