@@ -274,6 +274,10 @@ fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
         .border_style(border_style(focused));
     let inner = with_side_margins(block.inner(area));
     f.render_widget(block, area);
+    if app.editor.path.is_none() {
+        draw_welcome(f, inner);
+        return;
+    }
     // hide the block cursor while the tree has focus
     let cursor_style = if focused {
         Style::default().add_modifier(Modifier::REVERSED)
@@ -282,6 +286,35 @@ fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
     };
     app.editor.textarea.set_cursor_style(cursor_style);
     f.render_widget(&app.editor.textarea, inner);
+}
+
+/// The keys most useful before any file is open, shown centered and dim
+/// in the editor pane until the first file opens.
+fn draw_welcome(f: &mut Frame, area: Rect) {
+    let keys = [
+        ("Enter", "open file"),
+        ("n", "new file"),
+        ("Ctrl+P", "go to file"),
+        ("m", "move"),
+        ("Shift+R", "rename"),
+        ("Shift+X", "delete"),
+        ("Ctrl+B/Ctrl+T", "panes"),
+        ("Ctrl+Q", "quit"),
+    ];
+    let mut lines = vec![
+        Line::from("mrkdup").alignment(Alignment::Center),
+        Line::from(""),
+    ];
+    lines.extend(
+        keys.iter()
+            .map(|(k, v)| Line::from(format!("{k:>13}  {v}"))),
+    );
+    let width = lines.iter().map(|l| l.width()).max().unwrap_or(0) as u16;
+    let rect = centered_rect(width, lines.len() as u16, area);
+    f.render_widget(
+        Paragraph::new(lines).style(Style::default().add_modifier(Modifier::DIM)),
+        rect,
+    );
 }
 
 /// Inset a rect by 5% of its width on each side and 3% of its height on
@@ -511,6 +544,38 @@ mod tests {
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         let text = format!("{:?}", terminal.backend().buffer());
         assert!(text.contains("4 words"));
+    }
+
+    #[test]
+    fn welcome_pane_shows_key_cheat_sheet_until_a_file_opens() {
+        // root deliberately not named "mrkdup-…" so the app-name assert
+        // can't be satisfied by the tree title
+        let root = std::env::temp_dir().join("welcome-pane-fx");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("a.md"), "hello\n").unwrap();
+        let mut app = App::new(root).unwrap();
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        // at launch (no file open): the cheat sheet is showing
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let text = format!("{:?}", terminal.backend().buffer());
+        assert!(text.contains("mrkdup")); // app name
+        assert!(text.contains("go to file"));
+        assert!(text.contains("rename"));
+        assert!(text.contains("quit"));
+
+        // open a file: the cheat sheet is gone, content shows
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let text = format!("{:?}", terminal.backend().buffer());
+        assert!(!text.contains("go to file"));
+        assert!(!text.contains("quit"));
+        assert!(text.contains("hello"));
     }
 
     #[test]

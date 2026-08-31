@@ -5,6 +5,9 @@ soft-wrapping raw-text editor on the right. A thin, fast wrapper around
 plain files — it autosaves, writes atomically, and picks up external
 changes without clobbering yours.
 
+Until you open a file, the editor pane shows a short key cheat sheet;
+it disappears the moment a file opens.
+
 The tree shows directories and any text-based file (detected by content,
 not extension), honors `.gitignore`, and lazy-loads as you expand. Press
 `-` to climb above the directory you launched in. The focused pane has a
