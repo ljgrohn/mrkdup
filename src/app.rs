@@ -29,6 +29,10 @@ pub enum Prompt {
         dests: Vec<PathBuf>,
         selected: usize,
     },
+    Rename {
+        path: PathBuf,
+        input: String,
+    },
 }
 
 pub struct App {
@@ -140,6 +144,7 @@ impl App {
             KeyCode::Char('n') => self.prompt = Prompt::NewFile(String::new()),
             KeyCode::Char('X') => self.confirm_delete(),
             KeyCode::Char('m') => self.start_move(),
+            KeyCode::Char('R') => self.start_rename(),
             KeyCode::Char('r') => {
                 self.tree.refresh();
                 self.last_tree_refresh = Instant::now();
@@ -199,6 +204,53 @@ impl App {
             .to_string_lossy()
             .into_owned();
         self.status = Some(format!("moved to {shown}"));
+    }
+
+    fn start_rename(&mut self) {
+        match self.tree.selected_row() {
+            Some(r) if !r.is_dir => {
+                let input = r
+                    .path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
+                self.prompt = Prompt::Rename {
+                    path: r.path.clone(),
+                    input,
+                };
+            }
+            Some(_) => self.status = Some("can only rename files".into()),
+            None => {}
+        }
+    }
+
+    /// Rename `src` to `name` within its own directory.
+    fn submit_rename(&mut self, src: &std::path::Path, name: &str) {
+        if name.is_empty() || name.contains('/') || name == ".." {
+            self.status = Some("invalid file name".into());
+            return;
+        }
+        let Some(dir) = src.parent() else { return };
+        let target = dir.join(name);
+        if target == src {
+            return; // unchanged
+        }
+        if target.exists() {
+            self.status = Some("a file with that name already exists".into());
+            return;
+        }
+        if let Err(e) = std::fs::rename(src, &target) {
+            self.status = Some(format!("rename failed: {e}"));
+            return;
+        }
+        if self.editor.path.as_deref() == Some(src) {
+            self.editor.path = Some(target.clone());
+        }
+        // refresh tracks selection by the old (gone) path, so reselect
+        self.tree.refresh();
+        self.tree.select_path(&target);
+        self.status = Some(format!("renamed to {name}"));
     }
 
     fn confirm_delete(&mut self) {
@@ -467,6 +519,20 @@ impl App {
                     self.prompt = Prompt::None;
                     if yes {
                         self.delete_file(p);
+                    }
+                }
+                _ => {}
+            },
+            Prompt::Rename { input, .. } => match key.code {
+                KeyCode::Backspace => {
+                    input.pop();
+                }
+                KeyCode::Char(c) => input.push(c),
+                KeyCode::Enter => {
+                    if let Prompt::Rename { path, input } =
+                        std::mem::replace(&mut self.prompt, Prompt::None)
+                    {
+                        self.submit_rename(&path, input.trim());
                     }
                 }
                 _ => {}
@@ -1158,6 +1224,104 @@ mod tests {
         app.last_tree_refresh = std::time::Instant::now() - std::time::Duration::from_secs(3);
         app.tick();
         assert!(app.tree.rows().iter().any(|r| r.name == "new.md"));
+    }
+
+    /// Open the rename popup, erase `erase` chars of the prefill, type
+    /// `name`, and submit.
+    fn rename_to(app: &mut App, erase: usize, name: &str) {
+        app.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT));
+        for _ in 0..erase {
+            app.handle_key(key(KeyCode::Backspace));
+        }
+        for c in name.chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+        app.handle_key(key(KeyCode::Enter));
+    }
+
+    #[test]
+    fn shift_r_opens_rename_popup_prefilled_with_the_file_name() {
+        let mut app = App::new(fixture("ren-open")).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT));
+        match &app.prompt {
+            Prompt::Rename { input, .. } => assert_eq!(input, "a.md"),
+            _ => panic!("expected rename prompt"),
+        }
+    }
+
+    #[test]
+    fn rename_renames_the_file_and_keeps_it_selected() {
+        let root = fixture("ren-do");
+        let mut app = App::new(root.clone()).unwrap();
+        rename_to(&mut app, 4, "z.md"); // a.md -> z.md (sorts after b.md)
+        assert!(root.join("z.md").exists());
+        assert!(!root.join("a.md").exists());
+        assert_eq!(app.tree.selected_row().unwrap().name, "z.md");
+    }
+
+    #[test]
+    fn rename_to_existing_name_is_rejected() {
+        let root = fixture("ren-exists");
+        let mut app = App::new(root.clone()).unwrap();
+        rename_to(&mut app, 4, "b.md");
+        assert!(root.join("a.md").exists());
+        assert!(root.join("b.md").exists());
+        assert!(app.status.as_deref().is_some_and(|s| s.contains("exists")));
+    }
+
+    #[test]
+    fn rename_to_invalid_names_is_rejected() {
+        let root = fixture("ren-invalid");
+        let mut app = App::new(root.clone()).unwrap();
+        for name in ["docs/x.md", "..", ""] {
+            rename_to(&mut app, 4, name);
+            assert!(root.join("a.md").exists(), "rejected rename to {name:?}");
+            assert!(
+                app.status.as_deref().is_some_and(|s| s.contains("invalid")),
+                "status for {name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn shift_r_on_directory_is_refused() {
+        let root = fixture("ren-dir");
+        fs::create_dir_all(root.join("docs")).unwrap();
+        let mut app = App::new(root).unwrap();
+        // docs/ sorts first, so it's selected
+        app.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT));
+        assert!(matches!(app.prompt, Prompt::None));
+        assert!(app.status.as_deref().is_some_and(|s| s.contains("rename")));
+    }
+
+    #[test]
+    fn renaming_the_open_file_keeps_editing_it_at_the_new_path() {
+        let root = fixture("ren-open-file");
+        let mut app = App::new(root.clone()).unwrap();
+        app.handle_key(key(KeyCode::Enter)); // open a.md
+        app.handle_key(key(KeyCode::Esc));
+        rename_to(&mut app, 4, "z.md");
+        assert_eq!(
+            app.editor.path.as_deref(),
+            Some(root.canonicalize().unwrap().join("z.md").as_path())
+        );
+        // edits still save to the new name
+        app.focus = Focus::Editor;
+        app.handle_key(key(KeyCode::Char('Z')));
+        app.handle_key(ctrl('s'));
+        assert!(fs::read_to_string(root.join("z.md"))
+            .unwrap()
+            .starts_with('Z'));
+    }
+
+    #[test]
+    fn esc_closes_rename_popup_without_renaming() {
+        let root = fixture("ren-esc");
+        let mut app = App::new(root.clone()).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT));
+        app.handle_key(key(KeyCode::Esc));
+        assert!(matches!(app.prompt, Prompt::None));
+        assert!(root.join("a.md").exists());
     }
 
     #[test]

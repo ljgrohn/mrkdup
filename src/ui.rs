@@ -75,6 +75,9 @@ fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
     if let Prompt::Search(input) = &app.prompt {
         draw_input_popup(f, area, " Search ", input);
     }
+    if let Prompt::Rename { input, .. } = &app.prompt {
+        draw_input_popup(f, area, " Rename ", input);
+    }
     if let Prompt::MoveFile {
         src,
         dests,
@@ -265,6 +268,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
             format!("{mode}| type a name (dir/name.md works) · Enter create · Esc cancel")
         }
         Prompt::Search(_) => format!("{mode}| Enter jump · Esc cancel"),
+        Prompt::Rename { .. } => format!("{mode}| type the new name · Enter rename · Esc cancel"),
         Prompt::ConfirmDelete { .. } | Prompt::MoveFile { .. } => {
             format!("{mode}| j/k choose · Enter confirm · Esc cancel")
         }
@@ -390,6 +394,25 @@ mod tests {
         assert!(text.contains("wo")); // typed query shown in the popup
         assert!(text.contains("Enter jump")); // status bar shows hints…
         assert!(!text.contains("search: wo")); // …not the old inline query
+    }
+
+    #[test]
+    fn rename_prompt_renders_as_prefilled_popup_with_hint_in_status_bar() {
+        let root = std::env::temp_dir().join("mrkdup-ui-rename");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("a.md"), "x\n").unwrap();
+        let mut app = App::new(root).unwrap();
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('R'),
+            crossterm::event::KeyModifiers::SHIFT,
+        ));
+        let backend = TestBackend::new(60, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let text = format!("{:?}", terminal.backend().buffer());
+        assert!(text.contains("Rename")); // popup title
+        assert!(text.contains("Enter rename")); // status bar hint
     }
 
     #[test]

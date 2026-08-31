@@ -157,6 +157,18 @@ impl Tree {
         self.rebuild_keeping_selection();
     }
 
+    /// Select the visible row at `path`; returns whether it was found.
+    /// A miss leaves the selection unchanged.
+    pub fn select_path(&mut self, path: &Path) -> bool {
+        match self.rows.iter().position(|r| r.path == path) {
+            Some(i) => {
+                self.selected = i;
+                true
+            }
+            None => false,
+        }
+    }
+
     fn rebuild_keeping_selection(&mut self) {
         let selected_path = self.selected_row().map(|r| r.path.clone());
         self.rebuild();
@@ -371,6 +383,17 @@ mod tests {
         let before = t.root().to_path_buf();
         t.ascend();
         assert_eq!(t.root(), before);
+    }
+
+    #[test]
+    fn select_path_selects_the_matching_row() {
+        let mut t = Tree::new(fixture("selpath")).unwrap();
+        let target = t.root().join("zz.md");
+        assert!(t.select_path(&target));
+        assert_eq!(t.selected_row().unwrap().name, "zz.md");
+        // a missing path leaves the selection where it was
+        assert!(!t.select_path(Path::new("/nonexistent/nope.md")));
+        assert_eq!(t.selected_row().unwrap().name, "zz.md");
     }
 
     #[test]

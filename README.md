@@ -37,6 +37,7 @@ mrkdup [directory]   # defaults to the current directory
 | tree | g / G | jump to top / bottom |
 | tree | n | new file (popup; `dir/name.md` paths allowed) |
 | tree | m | move the selected file (popup lists directories) |
+| tree | Shift+R | rename the selected file (popup prefilled with the current name) |
 | tree | Shift+X | delete the selected file (confirm popup, No by default; Shift+X again confirms) |
 | tree | r | refresh the tree (it also auto-refreshes every ~2s) |
 | tree | - | go up: re-root the tree at the parent directory |
