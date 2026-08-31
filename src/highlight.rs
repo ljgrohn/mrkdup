@@ -220,7 +220,7 @@ fn inline(chars: &[char], from: usize, to: usize) -> Vec<SpanTok> {
     let mut spans = Vec::new();
     let mut text_start = from;
     let mut i = from;
-    let mut flush = |spans: &mut Vec<SpanTok>, text_start: usize, upto: usize| {
+    let flush = |spans: &mut Vec<SpanTok>, text_start: usize, upto: usize| {
         if upto > text_start {
             spans.push(tok(text_start, upto, Kind::Text));
         }

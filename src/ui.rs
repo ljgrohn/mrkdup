@@ -285,14 +285,9 @@ fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
         draw_welcome(f, inner);
         return;
     }
-    // hide the block cursor while the tree has focus
-    let cursor_style = if focused {
-        Style::default().add_modifier(Modifier::REVERSED)
-    } else {
-        Style::default()
-    };
-    app.editor.textarea.set_cursor_style(cursor_style);
-    f.render_widget(&app.editor.textarea, inner);
+    // our renderer: soft wrap + live syntax styling + terminal cursor
+    // (only drawn when the editor has focus)
+    crate::render::render_editor(f, app, inner, focused);
 }
 
 /// The keys most useful before any file is open, shown centered and dim

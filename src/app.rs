@@ -54,6 +54,10 @@ pub struct App {
     pub should_quit: bool,
     pub last_edit: Option<Instant>,
     pub last_tree_refresh: Instant,
+    /// vertical scroll of the editor renderer, in visual rows
+    pub editor_scroll: usize,
+    /// the query whose matches the renderer highlights (cleared on open)
+    pub search_highlight: Option<String>,
     pending_quit: bool,
     force_next_save: bool,
     last_search: String,
@@ -74,6 +78,8 @@ impl App {
             should_quit: false,
             last_edit: None,
             last_tree_refresh: Instant::now(),
+            editor_scroll: 0,
+            search_highlight: None,
             pending_quit: false,
             force_next_save: false,
             last_search: String::new(),
@@ -337,9 +343,10 @@ impl App {
         }
         match self.editor.open(&path) {
             Ok(()) => {
-                // open() rebuilds the textarea, but be explicit: no stale
-                // search highlight carries into the newly opened file
-                let _ = self.editor.textarea.set_search_pattern("");
+                // no stale search highlight or scroll carries into the
+                // newly opened file
+                self.search_highlight = None;
+                self.editor_scroll = 0;
                 self.focus = Focus::Editor;
                 self.editor_visible = true;
                 self.force_next_save = false;
@@ -686,12 +693,8 @@ impl App {
         if query.is_empty() {
             return;
         }
-        // highlight every match of the (escaped, so literal) query,
-        // (?i) making the highlight case-insensitive like the jump
-        let _ = self
-            .editor
-            .textarea
-            .set_search_pattern(format!("(?i){}", regex_escape(query)));
+        // the renderer highlights every (case-insensitive) match of this
+        self.search_highlight = Some(query.to_string());
         let DataCursor(crow, ccol) = self.editor.textarea.cursor();
         let lines: Vec<String> = self.editor.textarea.lines().to_vec();
         let n = lines.len();
@@ -721,7 +724,7 @@ impl App {
 
 /// Case-insensitive literal find: the char index of the first match of
 /// `query` in `hay` at or after char index `from_char`.
-fn find_ci(hay: &str, query: &str, from_char: usize) -> Option<usize> {
+pub(crate) fn find_ci(hay: &str, query: &str, from_char: usize) -> Option<usize> {
     let h: Vec<char> = hay.chars().collect();
     let q: Vec<char> = query.chars().collect();
     if q.is_empty() || h.len() < q.len() {
@@ -816,37 +819,6 @@ pub(crate) fn fuzzy_filter<'a>(
         .collect();
     scored.sort_by_key(|(s, _)| *s);
     scored.into_iter().map(|(_, c)| c).collect()
-}
-
-/// Escape `s` so it matches literally when used as a regex pattern.
-fn regex_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        if matches!(
-            c,
-            '\\' | '.'
-                | '+'
-                | '*'
-                | '?'
-                | '('
-                | ')'
-                | '|'
-                | '['
-                | ']'
-                | '{'
-                | '}'
-                | '^'
-                | '$'
-                | '#'
-                | '&'
-                | '-'
-                | '~'
-        ) {
-            out.push('\\');
-        }
-        out.push(c);
-    }
-    out
 }
 
 /// The checkbox-toggled form of `line`, indentation preserved.
@@ -1046,7 +1018,7 @@ mod tests {
     }
 
     #[test]
-    fn search_submit_sets_a_highlight_pattern() {
+    fn search_submit_arms_the_renderer_highlight() {
         let mut app = App::new(fixture("hl"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('f'));
@@ -1054,21 +1026,21 @@ mod tests {
             app.handle_key(key(KeyCode::Char(c)));
         }
         app.handle_key(key(KeyCode::Enter));
-        assert!(app.editor.textarea.search_pattern().is_some());
+        assert_eq!(app.search_highlight.as_deref(), Some("wor"));
     }
 
     #[test]
-    fn opening_a_file_clears_the_highlight_pattern() {
+    fn opening_a_file_clears_the_search_highlight() {
         let mut app = App::new(fixture("hl-clear"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // a.md
         app.handle_key(ctrl('f'));
         app.handle_key(key(KeyCode::Char('l')));
         app.handle_key(key(KeyCode::Enter));
-        assert!(app.editor.textarea.search_pattern().is_some());
+        assert!(app.search_highlight.is_some());
         app.handle_key(key(KeyCode::Esc));
         app.handle_key(key(KeyCode::Char('j'))); // b.md
         app.handle_key(key(KeyCode::Enter));
-        assert!(app.editor.textarea.search_pattern().is_none());
+        assert!(app.search_highlight.is_none());
     }
 
     #[test]
@@ -1083,17 +1055,8 @@ mod tests {
         }
         app.handle_key(key(KeyCode::Enter));
         assert_eq!(app.editor.textarea.cursor(), (0, 6));
-        // "axb" must not match the escaped pattern
-        let pat = app.editor.textarea.search_pattern().unwrap();
-        assert!(!pat.is_match("axb"));
-        assert!(pat.is_match("(a.b)"));
-    }
-
-    #[test]
-    fn regex_escape_neutralizes_metacharacters() {
-        assert_eq!(regex_escape("a.b*"), r"a\.b\*");
-        assert_eq!(regex_escape(r"[x]+(\d)"), r"\[x\]\+\(\\d\)");
-        assert_eq!(regex_escape("plain"), "plain");
+        // and the renderer's matcher is literal too: "axb" is no match
+        assert_eq!(find_ci("price axb here", "(a.b)", 0), None);
     }
 
     #[test]

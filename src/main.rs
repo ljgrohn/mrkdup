@@ -3,6 +3,7 @@ mod config;
 mod editor;
 mod fsutil;
 mod highlight;
+mod render;
 mod tree;
 mod ui;
 mod wrap;

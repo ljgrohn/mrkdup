@@ -12,7 +12,7 @@ categories = ["command-line-utilities", "text-editors"]
 [dependencies]
 ratatui = "0.30"
 crossterm = "0.29"
-ratatui-textarea = { version = "0.9", features = ["search"] }
+ratatui-textarea = "0.9"
 ignore = "0.4"
 unicode-width = "0.2"
 

@@ -1,5 +1,4 @@
-use ratatui::style::{Color, Style};
-use ratatui_textarea::{TextArea, WrapMode};
+use ratatui_textarea::TextArea;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -21,11 +20,10 @@ pub struct Editor {
     mtime: Option<SystemTime>,
 }
 
+// rendering (wrap, styling, cursor, search highlight) lives in render.rs;
+// the textarea here is purely the editing engine
 fn make_textarea(lines: Vec<String>) -> TextArea<'static> {
-    let mut ta = TextArea::from(lines);
-    ta.set_wrap_mode(WrapMode::WordOrGlyph);
-    ta.set_search_style(Style::default().bg(Color::Yellow).fg(Color::Black));
-    ta
+    TextArea::from(lines)
 }
 
 impl Editor {
