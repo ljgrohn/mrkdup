@@ -32,8 +32,8 @@ mrkdup [directory]   # defaults to the current directory
 |---|---|---|
 | global | Ctrl+B | show/hide tree pane |
 | global | Ctrl+T | show/hide editor pane (tree goes full width) |
-| global | Ctrl+P | go to file (fuzzy finder popup: type to filter, ↑/↓ or Ctrl+J/K choose, Enter opens) |
-| global | Ctrl+Q / Ctrl+C | quit (autosaves; if disk changed, warns — press again to discard) |
+| global | Ctrl+P (tree: p) | go to file (fuzzy finder popup: type to filter, ↑/↓ or Ctrl+J/K choose, Enter opens) |
+| global | Ctrl+Q / Ctrl+C (tree: q) | quit (autosaves; if disk changed, warns — press again to discard) |
 | editor | Esc / Shift+Tab | focus tree |
 | tree | Enter / Tab | open file (or expand/collapse dir) |
 | tree | j/k, ↑/↓ | move selection |
@@ -41,9 +41,9 @@ mrkdup [directory]   # defaults to the current directory
 | tree | g / G | jump to top / bottom |
 | tree | n | new file (popup; `dir/name.md` paths allowed) |
 | tree | m | move the selected file (popup lists directories) |
-| tree | Shift+R | rename the selected file (popup prefilled with the current name) |
-| tree | Shift+X | delete the selected file (confirm popup, No by default; Shift+X again confirms) |
-| tree | r | refresh the tree (it also auto-refreshes, every ~2s by default) |
+| tree | r | rename the selected file (popup prefilled with the current name) |
+| tree | x | delete the selected file (confirm popup, No by default; x again confirms) |
+| tree | u | refresh the tree (it also auto-refreshes, every ~2s by default) |
 | tree | - | go up: re-root the tree at the parent directory |
 | tree | + | zoom in: make the selected folder the tree root (a file: its folder) |
 | tree | . | toggle hidden files |

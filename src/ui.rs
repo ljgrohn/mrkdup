@@ -301,12 +301,12 @@ fn draw_welcome(f: &mut Frame, area: Rect) {
     let keys = [
         ("Enter", "open file"),
         ("n", "new file"),
-        ("Ctrl+P", "go to file"),
+        ("p", "go to file"),
         ("m", "move"),
-        ("Shift+R", "rename"),
-        ("Shift+X", "delete"),
+        ("r", "rename"),
+        ("x", "delete"),
         ("Ctrl+B/Ctrl+T", "panes"),
-        ("Ctrl+Q", "quit"),
+        ("q", "quit"),
     ];
     let mut lines = vec![
         Line::from("mrkdup").alignment(Alignment::Center),
@@ -487,7 +487,7 @@ mod tests {
         fs::write(root.join("a.md"), "x\n").unwrap();
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::Char('R'),
+            crossterm::event::KeyCode::Char('r'),
             crossterm::event::KeyModifiers::SHIFT,
         ));
         let backend = TestBackend::new(60, 12);

@@ -155,10 +155,12 @@ impl App {
             KeyCode::Char('-') => self.tree.ascend(),
             KeyCode::Char('+') => self.tree.make_root(),
             KeyCode::Char('n') => self.prompt = Prompt::NewFile(String::new()),
-            KeyCode::Char('X') => self.confirm_delete(),
+            KeyCode::Char('x' | 'X') => self.confirm_delete(),
             KeyCode::Char('m') => self.start_move(),
-            KeyCode::Char('R') => self.start_rename(),
-            KeyCode::Char('r') => {
+            KeyCode::Char('r') => self.start_rename(),
+            KeyCode::Char('p') => self.open_go_to_file(),
+            KeyCode::Char('q') => self.do_quit(),
+            KeyCode::Char('u') => {
                 self.tree.refresh();
                 self.last_tree_refresh = Instant::now();
                 self.status = Some("refreshed".into());
@@ -569,8 +571,8 @@ impl App {
             },
             Prompt::ConfirmDelete { path, yes } => match key.code {
                 KeyCode::Char('j' | 'k') | KeyCode::Down | KeyCode::Up => *yes = !*yes,
-                // Shift+X again = confirm the delete
-                KeyCode::Char('X') => {
+                // x again = confirm the delete
+                KeyCode::Char('x' | 'X') => {
                     let p = path.clone();
                     self.prompt = Prompt::None;
                     self.delete_file(p);
@@ -1172,6 +1174,28 @@ mod tests {
     }
 
     #[test]
+    fn plain_p_and_q_work_in_tree() {
+        let root = fixture("plain-keys");
+        let mut app = App::new(root, Config::default()).unwrap();
+        app.handle_key(key(KeyCode::Char('p')));
+        assert!(matches!(app.prompt, Prompt::GoToFile { .. }));
+        app.handle_key(key(KeyCode::Esc));
+        app.handle_key(key(KeyCode::Char('q')));
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn plain_p_and_q_still_type_in_editor() {
+        let root = fixture("plain-keys-editor");
+        let mut app = App::new(root, Config::default()).unwrap();
+        app.handle_key(key(KeyCode::Enter)); // open a.md ("hello"...)
+        app.handle_key(key(KeyCode::Char('q')));
+        app.handle_key(key(KeyCode::Char('p')));
+        assert_eq!(app.editor.textarea.lines()[0], "qphello");
+        assert!(!app.should_quit);
+    }
+
+    #[test]
     fn search_is_case_insensitive_both_ways() {
         let root = fixture("search-ci");
         fs::write(root.join("a.md"), "Ship it\nfriend ship\n").unwrap();
@@ -1350,7 +1374,7 @@ mod tests {
     fn shift_x_confirm_no_by_default_keeps_file() {
         let root = fixture("del-no");
         let mut app = App::new(root.clone(), Config::default()).unwrap();
-        app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
+        app.handle_key(key(KeyCode::Char('x')));
         assert!(matches!(
             app.prompt,
             Prompt::ConfirmDelete { yes: false, .. }
@@ -1364,7 +1388,7 @@ mod tests {
     fn shift_x_then_yes_deletes_file() {
         let root = fixture("del-yes");
         let mut app = App::new(root.clone(), Config::default()).unwrap();
-        app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
+        app.handle_key(key(KeyCode::Char('x')));
         app.handle_key(key(KeyCode::Char('j'))); // move highlight to Yes
         app.handle_key(key(KeyCode::Enter));
         assert!(!root.join("a.md").exists());
@@ -1375,8 +1399,8 @@ mod tests {
     fn shift_x_inside_popup_deletes_immediately() {
         let root = fixture("del-xx");
         let mut app = App::new(root.clone(), Config::default()).unwrap();
-        app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
-        app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
+        app.handle_key(key(KeyCode::Char('x')));
+        app.handle_key(key(KeyCode::Char('x')));
         assert!(!root.join("a.md").exists());
     }
 
@@ -1384,7 +1408,7 @@ mod tests {
     fn esc_closes_delete_popup_without_deleting() {
         let root = fixture("del-esc");
         let mut app = App::new(root.clone(), Config::default()).unwrap();
-        app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
+        app.handle_key(key(KeyCode::Char('x')));
         app.handle_key(key(KeyCode::Esc));
         assert!(matches!(app.prompt, Prompt::None));
         assert!(root.join("a.md").exists());
@@ -1396,7 +1420,7 @@ mod tests {
         let mut app = App::new(root.clone(), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // open a.md
         app.handle_key(key(KeyCode::Esc));
-        app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
+        app.handle_key(key(KeyCode::Char('x')));
         app.handle_key(key(KeyCode::Char('k'))); // k also toggles to Yes
         app.handle_key(key(KeyCode::Enter));
         assert!(app.editor.path.is_none());
@@ -1410,7 +1434,7 @@ mod tests {
         fs::write(root.join("docs/x.md"), "x\n").unwrap();
         let mut app = App::new(root.clone(), Config::default()).unwrap();
         // docs/ sorts first, so it's selected
-        app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
+        app.handle_key(key(KeyCode::Char('x')));
         assert!(matches!(app.prompt, Prompt::None));
         assert!(app.status.is_some());
         assert!(root.join("docs").exists());
@@ -1477,12 +1501,12 @@ mod tests {
     }
 
     #[test]
-    fn r_refreshes_tree_to_pick_up_external_files() {
+    fn u_refreshes_tree_to_pick_up_external_files() {
         let root = fixture("refresh-key");
         let mut app = App::new(root.clone(), Config::default()).unwrap();
         fs::write(root.join("new.md"), "n\n").unwrap();
         assert!(!app.tree.rows().iter().any(|r| r.name == "new.md"));
-        app.handle_key(key(KeyCode::Char('r')));
+        app.handle_key(key(KeyCode::Char('u')));
         assert!(app.tree.rows().iter().any(|r| r.name == "new.md"));
     }
 
@@ -1499,7 +1523,7 @@ mod tests {
     /// Open the rename popup, erase `erase` chars of the prefill, type
     /// `name`, and submit.
     fn rename_to(app: &mut App, erase: usize, name: &str) {
-        app.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT));
+        app.handle_key(key(KeyCode::Char('r')));
         for _ in 0..erase {
             app.handle_key(key(KeyCode::Backspace));
         }
@@ -1512,7 +1536,7 @@ mod tests {
     #[test]
     fn shift_r_opens_rename_popup_prefilled_with_the_file_name() {
         let mut app = App::new(fixture("ren-open"), Config::default()).unwrap();
-        app.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT));
+        app.handle_key(key(KeyCode::Char('r')));
         match &app.prompt {
             Prompt::Rename { input, .. } => assert_eq!(input, "a.md"),
             _ => panic!("expected rename prompt"),
@@ -1575,7 +1599,7 @@ mod tests {
         fs::create_dir_all(root.join("docs")).unwrap();
         let mut app = App::new(root, Config::default()).unwrap();
         // docs/ sorts first, so it's selected
-        app.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT));
+        app.handle_key(key(KeyCode::Char('r')));
         assert!(matches!(app.prompt, Prompt::None));
         assert!(app.status.as_deref().is_some_and(|s| s.contains("rename")));
     }
@@ -1604,7 +1628,7 @@ mod tests {
     fn esc_closes_rename_popup_without_renaming() {
         let root = fixture("ren-esc");
         let mut app = App::new(root.clone(), Config::default()).unwrap();
-        app.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT));
+        app.handle_key(key(KeyCode::Char('r')));
         app.handle_key(key(KeyCode::Esc));
         assert!(matches!(app.prompt, Prompt::None));
         assert!(root.join("a.md").exists());
