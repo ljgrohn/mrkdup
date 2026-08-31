@@ -4,7 +4,7 @@
 
 - [x] pressing m in tree should create a pop up that allows you to select where to move the highlighted file @done(2026-08-31 16:26)
 
-- [ ] when pressing n for a new file, I don't like that it is down at the bottom. Instead, make a pop up with the naming prompt
+- [x] when pressing n for a new file, I don't like that it is down at the bottom. Instead, make a pop up with the naming prompt @done(2026-08-31 16:29)
 
 - [ ] need a reload button where it scans the file folders for changes. Should we be polling on a regular basis? I don't want to add background processes if that isn't a good idea, but if it's not out of the norm and won't cause any issues I am down. Give me your best thoughts on it
 
