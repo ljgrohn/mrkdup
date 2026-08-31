@@ -43,11 +43,10 @@ mrkdup [directory]   # defaults to the current directory
 | editor | Ctrl+S | save (after a disk-conflict warning, a second Ctrl+S overwrites) |
 | editor | Ctrl+Z / Ctrl+Y | undo / redo |
 | editor | Ctrl+F | search in file (Enter jumps; empty search repeats the last one) |
-| editor | Shift+J / Shift+K | cursor down / up |
 | editor | Opt+J / Opt+K | next / previous paragraph |
 | editor | Cmd+J / Cmd+K | end / start of line |
 
-The modifier motions need a terminal that supports the kitty keyboard
+The Cmd motions need a terminal that supports the kitty keyboard
 protocol (Ghostty, kitty, WezTerm, recent iTerm2) — mrkdup enables it
 automatically where available. In terminals without it, Cmd never reaches
 the app, and Option needs "Use Option as Meta/Esc+" turned on.

@@ -274,12 +274,12 @@ impl App {
                     self.note_edit();
                 }
             }
-            // j/k motions with a modifier held (plain j/k still types):
-            // Shift = up/down, Option = paragraph, Cmd = line start/end
+            // j/k motions with Option or Cmd held (plain/shifted j/k
+            // still types): Option = paragraph, Cmd = line start/end
             (false, KeyCode::Char(c @ ('j' | 'k' | 'J' | 'K')))
                 if key
                     .modifiers
-                    .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT | KeyModifiers::SUPER) =>
+                    .intersects(KeyModifiers::ALT | KeyModifiers::SUPER) =>
             {
                 let down = matches!(c, 'j' | 'J');
                 let mv = if key.modifiers.contains(KeyModifiers::SUPER) {
@@ -288,16 +288,10 @@ impl App {
                     } else {
                         CursorMove::Head
                     }
-                } else if key.modifiers.contains(KeyModifiers::ALT) {
-                    if down {
-                        CursorMove::ParagraphForward
-                    } else {
-                        CursorMove::ParagraphBack
-                    }
                 } else if down {
-                    CursorMove::Down
+                    CursorMove::ParagraphForward
                 } else {
-                    CursorMove::Up
+                    CursorMove::ParagraphBack
                 };
                 self.editor.textarea.move_cursor(mv);
             }
@@ -633,15 +627,12 @@ mod tests {
     }
 
     #[test]
-    fn shift_jk_moves_cursor_without_typing() {
+    fn shift_jk_types_capital_letters() {
         let mut app = App::new(fixture("motion")).unwrap();
         app.handle_key(key(KeyCode::Enter)); // hello / world, cursor (0,0)
         app.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT));
-        assert_eq!(app.editor.textarea.cursor(), (1, 0));
         app.handle_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
-        assert_eq!(app.editor.textarea.cursor(), (0, 0));
-        assert_eq!(app.editor.textarea.lines(), ["hello", "world"]); // nothing typed
-        assert!(!app.editor.dirty);
+        assert_eq!(app.editor.textarea.lines()[0], "JKhello"); // typed, not moved
     }
 
     #[test]
