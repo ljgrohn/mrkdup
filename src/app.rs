@@ -1,15 +1,13 @@
 use std::io;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui_textarea::{CursorMove, DataCursor, Input};
 
+use crate::config::Config;
 use crate::editor::{Editor, SaveOutcome};
 use crate::tree::Tree;
-
-const IDLE_AUTOSAVE: Duration = Duration::from_secs(2);
-const TREE_REFRESH: Duration = Duration::from_secs(2);
 
 pub enum Focus {
     Tree,
@@ -46,6 +44,7 @@ pub enum Prompt {
 pub struct App {
     pub tree: Tree,
     pub editor: Editor,
+    pub config: Config,
     pub focus: Focus,
     pub tree_visible: bool,
     pub editor_visible: bool,
@@ -61,10 +60,11 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(root: PathBuf) -> io::Result<App> {
+    pub fn new(root: PathBuf, config: Config) -> io::Result<App> {
         Ok(App {
             tree: Tree::new(root)?,
             editor: Editor::new(),
+            config,
             focus: Focus::Tree,
             tree_visible: true,
             editor_visible: true,
@@ -114,7 +114,11 @@ impl App {
 
     /// Idle autosave + external-change pickup; called when input is quiet.
     pub fn tick(&mut self) {
-        if self.editor.dirty && self.last_edit.is_some_and(|t| t.elapsed() >= IDLE_AUTOSAVE) {
+        if self.editor.dirty
+            && self
+                .last_edit
+                .is_some_and(|t| t.elapsed() >= self.config.autosave())
+        {
             match self.editor.save(false) {
                 Ok(SaveOutcome::Saved) => self.status = Some("saved".into()),
                 Ok(SaveOutcome::Conflict) => {
@@ -133,7 +137,7 @@ impl App {
         }
         // pick up files created/removed outside the app; the rebuild
         // only walks expanded directories, so this stays cheap
-        if self.last_tree_refresh.elapsed() >= TREE_REFRESH {
+        if self.last_tree_refresh.elapsed() >= self.config.tree_refresh() {
             self.tree.refresh();
             self.last_tree_refresh = Instant::now();
         }
@@ -832,13 +836,13 @@ mod tests {
 
     #[test]
     fn starts_focused_on_tree() {
-        let app = App::new(fixture("start")).unwrap();
+        let app = App::new(fixture("start"), Config::default()).unwrap();
         assert!(matches!(app.focus, Focus::Tree));
     }
 
     #[test]
     fn enter_opens_file_and_focuses_editor() {
-        let mut app = App::new(fixture("open")).unwrap();
+        let mut app = App::new(fixture("open"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // a.md selected first
         assert!(matches!(app.focus, Focus::Editor));
         assert_eq!(app.editor.textarea.lines(), ["hello", "world"]);
@@ -846,7 +850,7 @@ mod tests {
 
     #[test]
     fn esc_returns_to_tree() {
-        let mut app = App::new(fixture("esc")).unwrap();
+        let mut app = App::new(fixture("esc"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(key(KeyCode::Esc));
         assert!(matches!(app.focus, Focus::Tree));
@@ -855,7 +859,7 @@ mod tests {
     #[test]
     fn typing_marks_dirty_and_switching_files_autosaves() {
         let root = fixture("autosave");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // open a.md
         app.handle_key(key(KeyCode::Char('X')));
         assert!(app.editor.dirty);
@@ -871,7 +875,7 @@ mod tests {
 
     #[test]
     fn ctrl_z_undoes_and_ctrl_y_redoes() {
-        let mut app = App::new(fixture("undo")).unwrap();
+        let mut app = App::new(fixture("undo"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(key(KeyCode::Char('X')));
         assert_eq!(app.editor.textarea.lines()[0], "Xhello");
@@ -883,7 +887,7 @@ mod tests {
 
     #[test]
     fn ctrl_b_toggles_tree_and_fixes_focus() {
-        let mut app = App::new(fixture("toggle")).unwrap();
+        let mut app = App::new(fixture("toggle"), Config::default()).unwrap();
         app.handle_key(ctrl('b'));
         assert!(!app.tree_visible);
         assert!(matches!(app.focus, Focus::Editor));
@@ -893,7 +897,7 @@ mod tests {
 
     #[test]
     fn ctrl_t_hides_editor_and_opening_a_file_reshows_it() {
-        let mut app = App::new(fixture("epane")).unwrap();
+        let mut app = App::new(fixture("epane"), Config::default()).unwrap();
         app.handle_key(ctrl('t'));
         assert!(!app.editor_visible);
         assert!(app.tree_visible);
@@ -905,7 +909,7 @@ mod tests {
 
     #[test]
     fn panes_can_never_both_be_hidden() {
-        let mut app = App::new(fixture("panes")).unwrap();
+        let mut app = App::new(fixture("panes"), Config::default()).unwrap();
         app.handle_key(ctrl('t')); // editor hidden
         app.handle_key(ctrl('b')); // hide tree -> editor must come back
         assert!(app.editor_visible);
@@ -918,7 +922,7 @@ mod tests {
     #[test]
     fn ctrl_q_saves_and_quits() {
         let root = fixture("quit");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(key(KeyCode::Char('Q')));
         app.handle_key(ctrl('q'));
@@ -932,7 +936,7 @@ mod tests {
     #[test]
     fn new_file_prompt_creates_and_opens() {
         let root = fixture("newfile");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Char('n')));
         for c in "notes.md".chars() {
             app.handle_key(key(KeyCode::Char(c)));
@@ -944,7 +948,7 @@ mod tests {
 
     #[test]
     fn search_jumps_to_match() {
-        let mut app = App::new(fixture("search")).unwrap();
+        let mut app = App::new(fixture("search"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // a.md: hello / world
         app.handle_key(ctrl('f'));
         for c in "wor".chars() {
@@ -956,7 +960,7 @@ mod tests {
 
     #[test]
     fn empty_search_repeats_last_search() {
-        let mut app = App::new(fixture("repeat")).unwrap();
+        let mut app = App::new(fixture("repeat"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // hello / world: two 'l'-runs
         app.handle_key(ctrl('f'));
         app.handle_key(key(KeyCode::Char('l')));
@@ -969,7 +973,7 @@ mod tests {
 
     #[test]
     fn ctrl_g_jumps_to_the_next_match_of_the_last_search() {
-        let mut app = App::new(fixture("next")).unwrap();
+        let mut app = App::new(fixture("next"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // hello / world
         app.handle_key(ctrl('f'));
         app.handle_key(key(KeyCode::Char('l')));
@@ -983,7 +987,7 @@ mod tests {
 
     #[test]
     fn ctrl_g_without_a_previous_search_shows_a_status_message() {
-        let mut app = App::new(fixture("next-none")).unwrap();
+        let mut app = App::new(fixture("next-none"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('g'));
         assert_eq!(app.editor.textarea.cursor(), (0, 0)); // didn't move
@@ -992,7 +996,7 @@ mod tests {
 
     #[test]
     fn search_submit_sets_a_highlight_pattern() {
-        let mut app = App::new(fixture("hl")).unwrap();
+        let mut app = App::new(fixture("hl"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('f'));
         for c in "wor".chars() {
@@ -1004,7 +1008,7 @@ mod tests {
 
     #[test]
     fn opening_a_file_clears_the_highlight_pattern() {
-        let mut app = App::new(fixture("hl-clear")).unwrap();
+        let mut app = App::new(fixture("hl-clear"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // a.md
         app.handle_key(ctrl('f'));
         app.handle_key(key(KeyCode::Char('l')));
@@ -1020,7 +1024,7 @@ mod tests {
     fn search_query_with_regex_metachars_matches_literally() {
         let root = fixture("meta");
         fs::write(root.join("a.md"), "price (a.b) here\n").unwrap();
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('f'));
         for c in "(a.b)".chars() {
@@ -1044,7 +1048,7 @@ mod tests {
     #[test]
     fn dash_reroots_tree_at_parent() {
         let root = fixture("ascend");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Char('-')));
         assert_eq!(
             app.tree.root(),
@@ -1058,7 +1062,7 @@ mod tests {
 
     #[test]
     fn shift_jk_types_capital_letters() {
-        let mut app = App::new(fixture("motion")).unwrap();
+        let mut app = App::new(fixture("motion"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // hello / world, cursor (0,0)
         app.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT));
         app.handle_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
@@ -1069,7 +1073,7 @@ mod tests {
     fn alt_jk_jumps_by_paragraph() {
         let root = fixture("para");
         fs::write(root.join("a.md"), "one\n\ntwo\n\nthree\n").unwrap();
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::ALT));
         let DataCursor(row, _) = app.editor.textarea.cursor();
@@ -1080,7 +1084,7 @@ mod tests {
 
     #[test]
     fn super_jk_jumps_to_line_end_and_start() {
-        let mut app = App::new(fixture("linejump")).unwrap();
+        let mut app = App::new(fixture("linejump"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // hello
         app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::SUPER));
         assert_eq!(app.editor.textarea.cursor(), (0, 5)); // end of "hello"
@@ -1090,7 +1094,7 @@ mod tests {
 
     #[test]
     fn dash_dash_zero_expands_to_checkbox() {
-        let mut app = App::new(fixture("expand0")).unwrap();
+        let mut app = App::new(fixture("expand0"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // "hello", cursor at (0,0)
         app.handle_key(key(KeyCode::Char('-')));
         app.handle_key(key(KeyCode::Char('-')));
@@ -1102,7 +1106,7 @@ mod tests {
 
     #[test]
     fn plain_zero_still_types_zero() {
-        let mut app = App::new(fixture("zero")).unwrap();
+        let mut app = App::new(fixture("zero"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(key(KeyCode::Char('0')));
         assert_eq!(app.editor.textarea.lines()[0], "0hello");
@@ -1110,7 +1114,7 @@ mod tests {
 
     #[test]
     fn triple_dash_zero_does_not_expand() {
-        let mut app = App::new(fixture("dashes")).unwrap();
+        let mut app = App::new(fixture("dashes"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         for c in "---0".chars() {
             app.handle_key(key(KeyCode::Char(c)));
@@ -1122,7 +1126,7 @@ mod tests {
     fn ctrl_d_checks_an_unchecked_checkbox() {
         let root = fixture("cb-check");
         fs::write(root.join("a.md"), "- [ ] milk\n").unwrap();
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('d'));
         assert_eq!(app.editor.textarea.lines()[0], "- [x] milk");
@@ -1134,7 +1138,7 @@ mod tests {
     fn ctrl_d_unchecks_a_checked_checkbox() {
         let root = fixture("cb-uncheck");
         fs::write(root.join("a.md"), "- [x] milk\n").unwrap();
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('d'));
         assert_eq!(app.editor.textarea.lines()[0], "- [ ] milk");
@@ -1144,7 +1148,7 @@ mod tests {
     fn ctrl_d_turns_a_bullet_into_a_checkbox() {
         let root = fixture("cb-bullet");
         fs::write(root.join("a.md"), "- milk\n").unwrap();
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('d'));
         assert_eq!(app.editor.textarea.lines()[0], "- [ ] milk");
@@ -1153,7 +1157,7 @@ mod tests {
     #[test]
     fn ctrl_d_prefixes_a_plain_line_and_shifts_the_cursor() {
         let root = fixture("cb-plain");
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // "hello", cursor (0,0)
         app.handle_key(ctrl('d'));
         assert_eq!(app.editor.textarea.lines()[0], "- [ ] hello");
@@ -1164,7 +1168,7 @@ mod tests {
     fn ctrl_d_preserves_indentation() {
         let root = fixture("cb-indent");
         fs::write(root.join("a.md"), "  - [ ] a\n    plain\n").unwrap();
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('d'));
         assert_eq!(app.editor.textarea.lines()[0], "  - [x] a");
@@ -1177,7 +1181,7 @@ mod tests {
     fn ctrl_d_on_an_empty_line_does_not_join_the_next_line() {
         let root = fixture("cb-empty");
         fs::write(root.join("a.md"), "\nworld\n").unwrap();
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('d'));
         assert_eq!(app.editor.textarea.lines(), ["- [ ] ", "world"]);
@@ -1186,7 +1190,7 @@ mod tests {
     #[test]
     fn ctrl_d_is_undoable() {
         let root = fixture("cb-undo");
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // "hello"
         app.handle_key(ctrl('d'));
         assert_eq!(app.editor.textarea.lines()[0], "- [ ] hello");
@@ -1198,7 +1202,7 @@ mod tests {
 
     #[test]
     fn shift_tab_in_editor_returns_to_tree_without_typing() {
-        let mut app = App::new(fixture("backtab")).unwrap();
+        let mut app = App::new(fixture("backtab"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // open a.md
         app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
         assert!(matches!(app.focus, Focus::Tree));
@@ -1211,7 +1215,7 @@ mod tests {
         let root = fixture("mkroot");
         fs::create_dir_all(root.join("docs")).unwrap();
         fs::write(root.join("docs/x.md"), "x\n").unwrap();
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         // docs/ sorts first (dirs before files), so it's already selected
         app.handle_key(KeyEvent::new(KeyCode::Char('+'), KeyModifiers::SHIFT));
         assert_eq!(app.tree.root(), root.canonicalize().unwrap().join("docs"));
@@ -1220,7 +1224,7 @@ mod tests {
     #[test]
     fn shift_x_confirm_no_by_default_keeps_file() {
         let root = fixture("del-no");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
         assert!(matches!(
             app.prompt,
@@ -1234,7 +1238,7 @@ mod tests {
     #[test]
     fn shift_x_then_yes_deletes_file() {
         let root = fixture("del-yes");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
         app.handle_key(key(KeyCode::Char('j'))); // move highlight to Yes
         app.handle_key(key(KeyCode::Enter));
@@ -1245,7 +1249,7 @@ mod tests {
     #[test]
     fn shift_x_inside_popup_deletes_immediately() {
         let root = fixture("del-xx");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
         app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
         assert!(!root.join("a.md").exists());
@@ -1254,7 +1258,7 @@ mod tests {
     #[test]
     fn esc_closes_delete_popup_without_deleting() {
         let root = fixture("del-esc");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
         app.handle_key(key(KeyCode::Esc));
         assert!(matches!(app.prompt, Prompt::None));
@@ -1264,7 +1268,7 @@ mod tests {
     #[test]
     fn deleting_the_open_file_clears_the_editor() {
         let root = fixture("del-open");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // open a.md
         app.handle_key(key(KeyCode::Esc));
         app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
@@ -1279,7 +1283,7 @@ mod tests {
         let root = fixture("del-dir");
         fs::create_dir_all(root.join("docs")).unwrap();
         fs::write(root.join("docs/x.md"), "x\n").unwrap();
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         // docs/ sorts first, so it's selected
         app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
         assert!(matches!(app.prompt, Prompt::None));
@@ -1291,7 +1295,7 @@ mod tests {
     fn m_moves_file_into_chosen_directory() {
         let root = fixture("move");
         fs::create_dir_all(root.join("docs")).unwrap();
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Char('j'))); // docs(0) -> a.md(1)
         app.handle_key(key(KeyCode::Char('m')));
         assert!(matches!(app.prompt, Prompt::MoveFile { .. }));
@@ -1305,7 +1309,7 @@ mod tests {
     fn m_on_directory_is_refused() {
         let root = fixture("move-dir");
         fs::create_dir_all(root.join("docs")).unwrap();
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Char('m'))); // docs selected
         assert!(matches!(app.prompt, Prompt::None));
         assert!(app.status.is_some());
@@ -1315,7 +1319,7 @@ mod tests {
     fn moving_the_open_file_keeps_editing_it_at_the_new_path() {
         let root = fixture("move-open");
         fs::create_dir_all(root.join("docs")).unwrap();
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Char('j')));
         app.handle_key(key(KeyCode::Enter)); // open a.md
         app.handle_key(key(KeyCode::Esc));
@@ -1339,7 +1343,7 @@ mod tests {
     fn move_to_same_directory_is_rejected() {
         let root = fixture("move-same");
         fs::create_dir_all(root.join("docs")).unwrap();
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Char('j'))); // a.md
         app.handle_key(key(KeyCode::Char('m')));
         app.handle_key(key(KeyCode::Enter)); // first dest is root = current dir
@@ -1350,7 +1354,7 @@ mod tests {
     #[test]
     fn r_refreshes_tree_to_pick_up_external_files() {
         let root = fixture("refresh-key");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         fs::write(root.join("new.md"), "n\n").unwrap();
         assert!(!app.tree.rows().iter().any(|r| r.name == "new.md"));
         app.handle_key(key(KeyCode::Char('r')));
@@ -1360,7 +1364,7 @@ mod tests {
     #[test]
     fn tick_auto_refreshes_tree_periodically() {
         let root = fixture("refresh-tick");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         fs::write(root.join("new.md"), "n\n").unwrap();
         app.last_tree_refresh = std::time::Instant::now() - std::time::Duration::from_secs(3);
         app.tick();
@@ -1382,7 +1386,7 @@ mod tests {
 
     #[test]
     fn shift_r_opens_rename_popup_prefilled_with_the_file_name() {
-        let mut app = App::new(fixture("ren-open")).unwrap();
+        let mut app = App::new(fixture("ren-open"), Config::default()).unwrap();
         app.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT));
         match &app.prompt {
             Prompt::Rename { input, .. } => assert_eq!(input, "a.md"),
@@ -1393,7 +1397,7 @@ mod tests {
     #[test]
     fn rename_renames_the_file_and_keeps_it_selected() {
         let root = fixture("ren-do");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         rename_to(&mut app, 4, "z.md"); // a.md -> z.md (sorts after b.md)
         assert!(root.join("z.md").exists());
         assert!(!root.join("a.md").exists());
@@ -1403,7 +1407,7 @@ mod tests {
     #[test]
     fn rename_to_existing_name_is_rejected() {
         let root = fixture("ren-exists");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         rename_to(&mut app, 4, "b.md");
         assert!(root.join("a.md").exists());
         assert!(root.join("b.md").exists());
@@ -1413,7 +1417,7 @@ mod tests {
     #[test]
     fn rename_to_invalid_names_is_rejected() {
         let root = fixture("ren-invalid");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         for name in ["docs/x.md", "..", ""] {
             rename_to(&mut app, 4, name);
             assert!(root.join("a.md").exists(), "rejected rename to {name:?}");
@@ -1428,7 +1432,7 @@ mod tests {
     fn shift_r_on_directory_is_refused() {
         let root = fixture("ren-dir");
         fs::create_dir_all(root.join("docs")).unwrap();
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         // docs/ sorts first, so it's selected
         app.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT));
         assert!(matches!(app.prompt, Prompt::None));
@@ -1438,7 +1442,7 @@ mod tests {
     #[test]
     fn renaming_the_open_file_keeps_editing_it_at_the_new_path() {
         let root = fixture("ren-open-file");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // open a.md
         app.handle_key(key(KeyCode::Esc));
         rename_to(&mut app, 4, "z.md");
@@ -1458,7 +1462,7 @@ mod tests {
     #[test]
     fn esc_closes_rename_popup_without_renaming() {
         let root = fixture("ren-esc");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         app.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT));
         app.handle_key(key(KeyCode::Esc));
         assert!(matches!(app.prompt, Prompt::None));
@@ -1511,7 +1515,7 @@ mod tests {
         fs::create_dir_all(root.join("docs")).unwrap();
         fs::write(root.join("docs/deep.md"), "d\n").unwrap();
         fs::write(root.join("bin.dat"), b"\x00\x01").unwrap();
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(ctrl('p'));
         match &app.prompt {
             Prompt::GoToFile { candidates, .. } => {
@@ -1527,7 +1531,7 @@ mod tests {
     #[test]
     fn ctrl_p_typing_filters_and_enter_opens_the_top_match() {
         let root = fixture("gtf-enter");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         app.handle_key(ctrl('p'));
         app.handle_key(key(KeyCode::Char('b')));
         app.handle_key(key(KeyCode::Enter));
@@ -1541,7 +1545,7 @@ mod tests {
 
     #[test]
     fn ctrl_p_selection_moves_with_arrows_and_ctrl_jk() {
-        let mut app = App::new(fixture("gtf-move")).unwrap();
+        let mut app = App::new(fixture("gtf-move"), Config::default()).unwrap();
         app.handle_key(ctrl('p')); // empty query: a.md, b.md in order
         app.handle_key(key(KeyCode::Down));
         match &app.prompt {
@@ -1565,7 +1569,7 @@ mod tests {
     #[test]
     fn ctrl_p_from_the_editor_autosaves_before_opening() {
         let root = fixture("gtf-autosave");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // open a.md
         app.handle_key(key(KeyCode::Char('X')));
         app.handle_key(ctrl('p')); // global: works from editor focus too
@@ -1582,7 +1586,7 @@ mod tests {
     fn ctrl_p_honors_the_tree_hidden_setting() {
         let root = fixture("gtf-hidden");
         fs::write(root.join(".secret.md"), "s\n").unwrap();
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(ctrl('p'));
         match &app.prompt {
             Prompt::GoToFile { candidates, .. } => {
@@ -1603,7 +1607,7 @@ mod tests {
 
     #[test]
     fn esc_closes_go_to_file_without_opening() {
-        let mut app = App::new(fixture("gtf-esc")).unwrap();
+        let mut app = App::new(fixture("gtf-esc"), Config::default()).unwrap();
         app.handle_key(ctrl('p'));
         app.handle_key(key(KeyCode::Esc));
         assert!(matches!(app.prompt, Prompt::None));
@@ -1612,7 +1616,7 @@ mod tests {
 
     #[test]
     fn ctrl_p_does_not_fire_inside_another_prompt() {
-        let mut app = App::new(fixture("gtf-nested")).unwrap();
+        let mut app = App::new(fixture("gtf-nested"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Char('n'))); // NewFile prompt
         app.handle_key(ctrl('p'));
         assert!(matches!(app.prompt, Prompt::NewFile(_)));
@@ -1620,7 +1624,7 @@ mod tests {
 
     #[test]
     fn enter_with_no_go_to_file_match_just_closes() {
-        let mut app = App::new(fixture("gtf-nomatch")).unwrap();
+        let mut app = App::new(fixture("gtf-nomatch"), Config::default()).unwrap();
         app.handle_key(ctrl('p'));
         for c in "qqq".chars() {
             app.handle_key(key(KeyCode::Char(c)));
@@ -1631,9 +1635,33 @@ mod tests {
     }
 
     #[test]
+    fn tick_honors_the_configured_autosave_delay() {
+        let root = fixture("cfg-autosave");
+        let (cfg, _) = crate::config::parse("autosave_seconds = 300\n");
+        let mut app = App::new(root, cfg).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(key(KeyCode::Char('Y')));
+        app.last_edit = Some(std::time::Instant::now() - std::time::Duration::from_secs(5));
+        app.tick();
+        assert!(app.editor.dirty); // 5s idle < the configured 300s
+    }
+
+    #[test]
+    fn tick_honors_the_configured_tree_refresh_interval() {
+        let root = fixture("cfg-refresh");
+        let (cfg, _) = crate::config::parse("tree_refresh_seconds = 300\n");
+        let mut app = App::new(root.clone(), cfg).unwrap();
+        fs::write(root.join("new.md"), "n\n").unwrap();
+        app.last_tree_refresh = std::time::Instant::now() - std::time::Duration::from_secs(5);
+        app.tick();
+        // 5s < the configured 300s: no refresh yet
+        assert!(!app.tree.rows().iter().any(|r| r.name == "new.md"));
+    }
+
+    #[test]
     fn tick_idle_autosaves() {
         let root = fixture("tick");
-        let mut app = App::new(root.clone()).unwrap();
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(key(KeyCode::Char('Y')));
         app.last_edit = Some(std::time::Instant::now() - std::time::Duration::from_secs(3));

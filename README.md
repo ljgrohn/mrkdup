@@ -43,7 +43,7 @@ mrkdup [directory]   # defaults to the current directory
 | tree | m | move the selected file (popup lists directories) |
 | tree | Shift+R | rename the selected file (popup prefilled with the current name) |
 | tree | Shift+X | delete the selected file (confirm popup, No by default; Shift+X again confirms) |
-| tree | r | refresh the tree (it also auto-refreshes every ~2s) |
+| tree | r | refresh the tree (it also auto-refreshes, every ~2s by default) |
 | tree | - | go up: re-root the tree at the parent directory |
 | tree | + | zoom in: make the selected folder the tree root (a file: its folder) |
 | tree | . | toggle hidden files |
@@ -60,9 +60,39 @@ protocol (Ghostty, kitty, WezTerm, recent iTerm2) — mrkdup enables it
 automatically where available. In terminals without it, Cmd never reaches
 the app, and Option needs "Use Option as Meta/Esc+" turned on.
 
+## Configuration
+
+mrkdup reads `$XDG_CONFIG_HOME/mrkdup/config` at startup
+(`~/.config/mrkdup/config` when `XDG_CONFIG_HOME` is unset). The file is
+optional — no file means all defaults — and it never causes a crash:
+lines that can't be parsed (or name an unknown option) are ignored, with
+a one-line warning in the status bar.
+
+The format is plain `key = value` lines; `#` starts a comment and blank
+lines are fine. Values are whole numbers; out-of-range values are
+clamped into the ranges below.
+
+```ini
+# ~/.config/mrkdup/config
+tree_width = 30
+side_margin_percent = 5
+autosave_seconds = 10
+```
+
+| Option | Default | Range | Meaning |
+|---|---|---|---|
+| `tree_width` | 30 | 10–120 | tree pane width, in columns |
+| `side_margin_percent` | 5 | 0–40 | editor breathing room: % of pane width trimmed off each side |
+| `top_margin_percent` | 3 | 0–40 | editor breathing room: % of pane height trimmed off the top |
+| `autosave_seconds` | 2 | 1–600 | idle seconds before a dirty buffer autosaves |
+| `tree_refresh_seconds` | 2 | 1–600 | seconds between automatic tree refreshes |
+
+Keybindings are not remappable.
+
 ## Saving model
 
-- Edits autosave on file switch, on quit, and after ~2s idle.
+- Edits autosave on file switch, on quit, and after ~2s idle
+  (`autosave_seconds` in the config file).
 - Writes are atomic (temp file + rename) — a crash never truncates a file.
 - If a file changed on disk while your buffer is clean, it reloads
   silently. If your buffer is dirty, mrkdup refuses to clobber the disk

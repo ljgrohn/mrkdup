@@ -1,4 +1,5 @@
 mod app;
+mod config;
 mod editor;
 mod fsutil;
 mod tree;
@@ -20,7 +21,15 @@ fn main() -> io::Result<()> {
         Some(p) => PathBuf::from(p),
         None => env::current_dir()?,
     };
-    let mut app = app::App::new(root)?;
+    let (config, warnings) = config::load();
+    let mut app = app::App::new(root, config)?;
+    if !warnings.is_empty() {
+        app.status = Some(format!(
+            "config: ignored {} line(s) — {}",
+            warnings.len(),
+            warnings[0]
+        ));
+    }
     let mut terminal = ratatui::init();
     // Without the kitty keyboard protocol, terminals never report the
     // Cmd/Super modifier (and often not Shift on letters); enable it

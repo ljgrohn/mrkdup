@@ -20,8 +20,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(f.area());
 
     if app.tree_visible && app.editor_visible {
-        let [tree_area, editor_area] =
-            Layout::horizontal([Constraint::Length(30), Constraint::Min(1)]).areas(main);
+        let [tree_area, editor_area] = Layout::horizontal([
+            Constraint::Length(app.config.tree_width),
+            Constraint::Min(1),
+        ])
+        .areas(main);
         draw_tree(f, app, tree_area);
         draw_editor(f, app, editor_area);
     } else if app.tree_visible {
@@ -272,7 +275,11 @@ fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style(focused));
-    let inner = with_side_margins(block.inner(area));
+    let inner = with_side_margins(
+        block.inner(area),
+        app.config.side_margin_percent,
+        app.config.top_margin_percent,
+    );
     f.render_widget(block, area);
     if app.editor.path.is_none() {
         draw_welcome(f, inner);
@@ -317,11 +324,11 @@ fn draw_welcome(f: &mut Frame, area: Rect) {
     );
 }
 
-/// Inset a rect by 5% of its width on each side and 3% of its height on
-/// top (breathing room for text).
-fn with_side_margins(r: Rect) -> Rect {
-    let pad = (r.width as u32 * 5 / 100) as u16;
-    let top = (r.height as u32 * 3 / 100) as u16;
+/// Inset a rect by `side_pct`% of its width on each side and `top_pct`%
+/// of its height on top (breathing room for text).
+fn with_side_margins(r: Rect, side_pct: u16, top_pct: u16) -> Rect {
+    let pad = (r.width as u32 * side_pct as u32 / 100) as u16;
+    let top = (r.height as u32 * top_pct as u32 / 100) as u16;
     Rect {
         x: r.x + pad,
         y: r.y + top,
@@ -389,6 +396,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
 mod tests {
     use super::*;
     use crate::app::App;
+    use crate::config::Config;
     use ratatui::{backend::TestBackend, Terminal};
     use std::fs;
 
@@ -398,7 +406,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("a.md"), "one two three four five six seven\n").unwrap();
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(crossterm::event::KeyEvent::new(
             crossterm::event::KeyCode::Enter,
             crossterm::event::KeyModifiers::NONE,
@@ -428,7 +436,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("a.md"), "x\n").unwrap();
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(crossterm::event::KeyEvent::new(
             crossterm::event::KeyCode::Char('n'),
             crossterm::event::KeyModifiers::NONE,
@@ -451,7 +459,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("a.md"), "hello world\n").unwrap();
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         let key =
             |code| crossterm::event::KeyEvent::new(code, crossterm::event::KeyModifiers::NONE);
         app.handle_key(key(crossterm::event::KeyCode::Enter)); // open a.md
@@ -477,7 +485,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("a.md"), "x\n").unwrap();
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(crossterm::event::KeyEvent::new(
             crossterm::event::KeyCode::Char('R'),
             crossterm::event::KeyModifiers::SHIFT,
@@ -497,7 +505,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("apple.md"), "a\n").unwrap();
         fs::write(root.join("banana.md"), "b\n").unwrap();
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         let key =
             |code| crossterm::event::KeyEvent::new(code, crossterm::event::KeyModifiers::NONE);
         let ctrl = |c| {
@@ -528,7 +536,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("a.md"), "one two three\nfour\n").unwrap();
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         let backend = TestBackend::new(60, 12);
         let mut terminal = Terminal::new(backend).unwrap();
 
@@ -554,7 +562,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("a.md"), "hello\n").unwrap();
-        let mut app = App::new(root).unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
         let backend = TestBackend::new(80, 20);
         let mut terminal = Terminal::new(backend).unwrap();
 
@@ -606,13 +614,36 @@ mod tests {
 
     #[test]
     fn editor_text_gets_side_and_top_margins() {
-        let r = with_side_margins(ratatui::layout::Rect::new(10, 0, 100, 100));
+        let r = with_side_margins(ratatui::layout::Rect::new(10, 0, 100, 100), 5, 3);
         assert_eq!(r.x, 15); // 5% of 100 = 5 cols in
         assert_eq!(r.width, 90); // 5 off each side
         assert_eq!(r.y, 3); // 3% of 100 = 3 rows down
         assert_eq!(r.height, 97); // trimmed from the top only
-        let tiny = with_side_margins(ratatui::layout::Rect::new(0, 0, 3, 5));
+        let tiny = with_side_margins(ratatui::layout::Rect::new(0, 0, 3, 5), 5, 3);
         assert_eq!(tiny.width, 3); // tiny pane: percentages round to 0, no underflow
         assert_eq!(tiny.height, 5);
+        // configured percentages apply; 0 means no margin at all
+        let wide = with_side_margins(ratatui::layout::Rect::new(0, 0, 100, 100), 20, 10);
+        assert_eq!((wide.x, wide.width, wide.y, wide.height), (20, 60, 10, 90));
+        let none = with_side_margins(ratatui::layout::Rect::new(0, 0, 100, 100), 0, 0);
+        assert_eq!(none, ratatui::layout::Rect::new(0, 0, 100, 100));
+    }
+
+    #[test]
+    fn tree_pane_width_comes_from_config() {
+        let root = std::env::temp_dir().join("mrkdup-ui-cfgwidth");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("a.md"), "x\n").unwrap();
+        let (cfg, _) = crate::config::parse("tree_width = 20\n");
+        let mut app = App::new(root, cfg).unwrap();
+        let backend = TestBackend::new(60, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buf = terminal.backend().buffer();
+        // tree occupies columns 0..20: its top-right corner sits at x=19
+        // and the editor block starts at x=20 (default would be 29/30)
+        assert_eq!(buf.cell((19u16, 0u16)).unwrap().symbol(), "┐");
+        assert_eq!(buf.cell((20u16, 0u16)).unwrap().symbol(), "┌");
     }
 }
