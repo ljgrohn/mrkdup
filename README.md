@@ -45,7 +45,7 @@ mrkdup [directory]   # defaults to the current directory
 | editor | Ctrl+S | save (after a disk-conflict warning, a second Ctrl+S overwrites) |
 | editor | Ctrl+Z / Ctrl+Y | undo / redo |
 | editor | Ctrl+D | toggle checkbox on the line (`- [ ]` ↔ `- [x]`; other lines gain a `- [ ] ` prefix) |
-| editor | Ctrl+F | search in file (Enter jumps and highlights all matches; empty search repeats the last one) |
+| editor | Ctrl+F | search in file (popup; Enter jumps and highlights all matches; empty search repeats the last one) |
 | editor | Ctrl+G | jump to the next match of the last search |
 | editor | Opt+J / Opt+K | next / previous paragraph |
 | editor | Cmd+J / Cmd+K | end / start of line |

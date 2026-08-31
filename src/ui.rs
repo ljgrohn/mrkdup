@@ -53,19 +53,27 @@ fn popup_block(title: &str) -> Block<'_> {
         .title(title)
 }
 
+/// A one-line text-input popup: the typed input followed by a block cursor.
+fn draw_input_popup(f: &mut Frame, area: Rect, title: &str, input: &str) {
+    let width = (input.len() as u16 + 8).max(40);
+    let popup = centered_rect(width, 3, area);
+    f.render_widget(Clear, popup);
+    let block = popup_block(title);
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+    let line = Line::from(vec![
+        ratatui::text::Span::raw(format!(" {input}")),
+        ratatui::text::Span::styled(" ", Style::default().add_modifier(Modifier::REVERSED)),
+    ]);
+    f.render_widget(Paragraph::new(line), inner);
+}
+
 fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
     if let Prompt::NewFile(input) = &app.prompt {
-        let width = (input.len() as u16 + 8).max(40);
-        let popup = centered_rect(width, 3, area);
-        f.render_widget(Clear, popup);
-        let block = popup_block(" New file ");
-        let inner = block.inner(popup);
-        f.render_widget(block, popup);
-        let line = Line::from(vec![
-            ratatui::text::Span::raw(format!(" {input}")),
-            ratatui::text::Span::styled(" ", Style::default().add_modifier(Modifier::REVERSED)),
-        ]);
-        f.render_widget(Paragraph::new(line), inner);
+        draw_input_popup(f, area, " New file ", input);
+    }
+    if let Prompt::Search(input) = &app.prompt {
+        draw_input_popup(f, area, " Search ", input);
     }
     if let Prompt::MoveFile {
         src,
@@ -256,7 +264,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         Prompt::NewFile(_) => {
             format!("{mode}| type a name (dir/name.md works) · Enter create · Esc cancel")
         }
-        Prompt::Search(s) => format!("{mode}| search: {s}"),
+        Prompt::Search(_) => format!("{mode}| Enter jump · Esc cancel"),
         Prompt::ConfirmDelete { .. } | Prompt::MoveFile { .. } => {
             format!("{mode}| j/k choose · Enter confirm · Esc cancel")
         }
@@ -356,6 +364,32 @@ mod tests {
         let text = format!("{:?}", terminal.backend().buffer());
         assert!(text.contains("New file")); // popup title
         assert!(text.contains("z")); // typed input shown in the popup
+    }
+
+    #[test]
+    fn search_prompt_renders_as_popup_with_hint_in_status_bar() {
+        let root = std::env::temp_dir().join("mrkdup-ui-search");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("a.md"), "hello world\n").unwrap();
+        let mut app = App::new(root).unwrap();
+        let key =
+            |code| crossterm::event::KeyEvent::new(code, crossterm::event::KeyModifiers::NONE);
+        app.handle_key(key(crossterm::event::KeyCode::Enter)); // open a.md
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('f'),
+            crossterm::event::KeyModifiers::CONTROL,
+        ));
+        app.handle_key(key(crossterm::event::KeyCode::Char('w')));
+        app.handle_key(key(crossterm::event::KeyCode::Char('o')));
+        let backend = TestBackend::new(60, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let text = format!("{:?}", terminal.backend().buffer());
+        assert!(text.contains("Search")); // popup title
+        assert!(text.contains("wo")); // typed query shown in the popup
+        assert!(text.contains("Enter jump")); // status bar shows hints…
+        assert!(!text.contains("search: wo")); // …not the old inline query
     }
 
     #[test]
