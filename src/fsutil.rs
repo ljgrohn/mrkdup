@@ -1,6 +1,22 @@
 use std::fs::File;
-use std::io::Read;
+use std::io::{self, Read, Write};
 use std::path::Path;
+
+/// Write via a temp file in the same directory + rename, so a crash
+/// mid-write can never truncate the destination.
+pub fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
+    let tmp = dir.join(format!(".{}.markdup-tmp", name.to_string_lossy()));
+    {
+        let mut f = File::create(&tmp)?;
+        f.write_all(contents)?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)
+}
 
 /// A file is "text" if its first 8KB contain no NUL byte.
 /// Unreadable/missing files are not text.
@@ -45,5 +61,37 @@ mod tests {
     #[test]
     fn utf8_content_is_text() {
         assert!(is_text_file(&tmp("uni.md", "héllo — 你好 🎉\n".as_bytes())));
+    }
+
+    #[test]
+    fn atomic_write_creates_file() {
+        let dir = std::env::temp_dir().join("markdup-test-aw1");
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("out.md");
+        atomic_write(&p, b"content\n").unwrap();
+        assert_eq!(fs::read(&p).unwrap(), b"content\n");
+    }
+
+    #[test]
+    fn atomic_write_replaces_existing() {
+        let dir = std::env::temp_dir().join("markdup-test-aw2");
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("out.md");
+        fs::write(&p, b"old").unwrap();
+        atomic_write(&p, b"new\n").unwrap();
+        assert_eq!(fs::read(&p).unwrap(), b"new\n");
+    }
+
+    #[test]
+    fn atomic_write_leaves_no_temp_file() {
+        let dir = std::env::temp_dir().join("markdup-test-aw3");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        atomic_write(&dir.join("out.md"), b"x\n").unwrap();
+        let names: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["out.md"]);
     }
 }
