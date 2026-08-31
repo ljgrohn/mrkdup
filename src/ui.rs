@@ -92,7 +92,7 @@ fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style(focused));
-    let inner = block.inner(area);
+    let inner = with_side_margins(block.inner(area));
     f.render_widget(block, area);
     // hide the block cursor while the tree has focus
     let cursor_style = if focused {
@@ -102,6 +102,16 @@ fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
     };
     app.editor.textarea.set_cursor_style(cursor_style);
     f.render_widget(&app.editor.textarea, inner);
+}
+
+/// Inset a rect by 5% of its width on each side (breathing room for text).
+fn with_side_margins(r: Rect) -> Rect {
+    let pad = (r.width as u32 * 5 / 100) as u16;
+    Rect {
+        x: r.x + pad,
+        width: r.width.saturating_sub(pad * 2),
+        ..r
+    }
 }
 
 fn draw_status(f: &mut Frame, app: &App, area: Rect) {
@@ -175,5 +185,14 @@ mod tests {
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         let text = format!("{:?}", terminal.backend().buffer());
         assert!(text.contains("TREE"));
+    }
+
+    #[test]
+    fn editor_text_gets_five_percent_side_margins() {
+        let r = with_side_margins(ratatui::layout::Rect::new(10, 0, 100, 20));
+        assert_eq!(r.x, 15); // 5% of 100 = 5 cols in
+        assert_eq!(r.width, 90); // 5 off each side
+        let tiny = with_side_margins(ratatui::layout::Rect::new(0, 0, 3, 5));
+        assert_eq!(tiny.width, 3); // tiny pane: 5% rounds to 0 pad, no underflow
     }
 }
