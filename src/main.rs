@@ -2,6 +2,7 @@ mod app;
 mod config;
 mod editor;
 mod fsutil;
+mod highlight;
 mod tree;
 mod ui;
 mod wrap;

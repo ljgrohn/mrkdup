@@ -29,7 +29,11 @@ pub fn layout(lines: &[String], width: usize) -> Vec<VisualRow> {
     for (li, line) in lines.iter().enumerate() {
         let chars: Vec<char> = line.chars().collect();
         if chars.is_empty() {
-            rows.push(VisualRow { line: li, start: 0, end: 0 });
+            rows.push(VisualRow {
+                line: li,
+                start: 0,
+                end: 0,
+            });
             continue;
         }
         let mut start = 0;
@@ -56,7 +60,11 @@ pub fn layout(lines: &[String], width: usize) -> Vec<VisualRow> {
                     }
                 }
             }
-            rows.push(VisualRow { line: li, start, end });
+            rows.push(VisualRow {
+                line: li,
+                start,
+                end,
+            });
             start = end;
         }
     }
@@ -115,13 +123,27 @@ mod tests {
     #[test]
     fn short_line_is_one_row() {
         let rows = layout(&lines(&["hello"]), 10);
-        assert_eq!(rows, vec![VisualRow { line: 0, start: 0, end: 5 }]);
+        assert_eq!(
+            rows,
+            vec![VisualRow {
+                line: 0,
+                start: 0,
+                end: 5
+            }]
+        );
     }
 
     #[test]
     fn empty_line_is_one_empty_row() {
         let rows = layout(&lines(&[""]), 10);
-        assert_eq!(rows, vec![VisualRow { line: 0, start: 0, end: 0 }]);
+        assert_eq!(
+            rows,
+            vec![VisualRow {
+                line: 0,
+                start: 0,
+                end: 0
+            }]
+        );
     }
 
     #[test]
@@ -136,8 +158,16 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                VisualRow { line: 0, start: 0, end: 5 },
-                VisualRow { line: 0, start: 5, end: 8 },
+                VisualRow {
+                    line: 0,
+                    start: 0,
+                    end: 5
+                },
+                VisualRow {
+                    line: 0,
+                    start: 5,
+                    end: 8
+                },
             ]
         );
     }
@@ -149,8 +179,16 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                VisualRow { line: 0, start: 0, end: 6 },
-                VisualRow { line: 0, start: 6, end: 11 },
+                VisualRow {
+                    line: 0,
+                    start: 0,
+                    end: 6
+                },
+                VisualRow {
+                    line: 0,
+                    start: 6,
+                    end: 11
+                },
             ]
         );
     }
@@ -160,7 +198,14 @@ mod tests {
         // 你=2 cells; width 4 fits two chars per row
         let rows = layout(&lines(&["你好世界"]), 4);
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0], VisualRow { line: 0, start: 0, end: 2 });
+        assert_eq!(
+            rows[0],
+            VisualRow {
+                line: 0,
+                start: 0,
+                end: 2
+            }
+        );
     }
 
     #[test]
@@ -173,7 +218,14 @@ mod tests {
     fn multiple_lines_stack() {
         let rows = layout(&lines(&["ab", "", "cd"]), 10);
         assert_eq!(rows.len(), 3);
-        assert_eq!(rows[1], VisualRow { line: 1, start: 0, end: 0 });
+        assert_eq!(
+            rows[1],
+            VisualRow {
+                line: 1,
+                start: 0,
+                end: 0
+            }
+        );
         assert_eq!(rows[2].line, 2);
     }
 
