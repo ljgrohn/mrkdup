@@ -9,7 +9,7 @@ pub fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
     let name = path
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
-    let tmp = dir.join(format!(".{}.markdup-tmp", name.to_string_lossy()));
+    let tmp = dir.join(format!(".{}.mrkdup-tmp", name.to_string_lossy()));
     {
         let mut f = File::create(&tmp)?;
         f.write_all(contents)?;
@@ -37,7 +37,7 @@ mod tests {
     use std::fs;
 
     fn tmp(name: &str, bytes: &[u8]) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!("markdup-test-{name}"));
+        let p = std::env::temp_dir().join(format!("mrkdup-test-{name}"));
         fs::write(&p, bytes).unwrap();
         p
     }
@@ -69,7 +69,7 @@ mod tests {
 
     #[test]
     fn atomic_write_creates_file() {
-        let dir = std::env::temp_dir().join("markdup-test-aw1");
+        let dir = std::env::temp_dir().join("mrkdup-test-aw1");
         fs::create_dir_all(&dir).unwrap();
         let p = dir.join("out.md");
         atomic_write(&p, b"content\n").unwrap();
@@ -78,7 +78,7 @@ mod tests {
 
     #[test]
     fn atomic_write_replaces_existing() {
-        let dir = std::env::temp_dir().join("markdup-test-aw2");
+        let dir = std::env::temp_dir().join("mrkdup-test-aw2");
         fs::create_dir_all(&dir).unwrap();
         let p = dir.join("out.md");
         fs::write(&p, b"old").unwrap();
@@ -88,7 +88,7 @@ mod tests {
 
     #[test]
     fn atomic_write_leaves_no_temp_file() {
-        let dir = std::env::temp_dir().join("markdup-test-aw3");
+        let dir = std::env::temp_dir().join("mrkdup-test-aw3");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         atomic_write(&dir.join("out.md"), b"x\n").unwrap();

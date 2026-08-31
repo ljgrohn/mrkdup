@@ -102,7 +102,7 @@ mod tests {
     use std::fs;
 
     fn tmpfile(tag: &str, content: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!("markdup-ed-{tag}.md"));
+        let p = std::env::temp_dir().join(format!("mrkdup-ed-{tag}.md"));
         fs::write(&p, content).unwrap();
         p
     }

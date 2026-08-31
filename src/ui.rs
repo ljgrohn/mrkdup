@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn draws_tree_and_wrapped_editor() {
-        let root = std::env::temp_dir().join("markdup-ui-1");
+        let root = std::env::temp_dir().join("mrkdup-ui-1");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("a.md"), "one two three four five six seven\n").unwrap();

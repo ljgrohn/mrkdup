@@ -331,7 +331,7 @@ mod tests {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
     }
     fn fixture(tag: &str) -> std::path::PathBuf {
-        let root = std::env::temp_dir().join(format!("markdup-app-{tag}"));
+        let root = std::env::temp_dir().join(format!("mrkdup-app-{tag}"));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("a.md"), "hello\nworld\n").unwrap();

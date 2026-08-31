@@ -1,11 +1,11 @@
-# Contributing to markdup
+# Contributing to mrkdup
 
-Thanks for your interest! markdup is intentionally small, and contributions
+Thanks for your interest! mrkdup is intentionally small, and contributions
 that keep it that way are the most likely to land.
 
 ## Ground rules
 
-- **Plain files are the only state.** markdup edits text files in place — no
+- **Plain files are the only state.** mrkdup edits text files in place — no
   sidecar files, no databases, no per-project config. What's on disk is the
   truth.
 - **Never lose user data.** All writes go through the atomic temp-file+rename

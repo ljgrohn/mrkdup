@@ -1,4 +1,4 @@
-# markdup
+# mrkdup
 
 A terminal markdown editor: a collapsible file tree on the left, a
 soft-wrapping raw-text editor on the right. A thin, fast wrapper around
@@ -19,7 +19,7 @@ cargo install --path .
 ## Use
 
 ```sh
-markdup [directory]   # defaults to the current directory
+mrkdup [directory]   # defaults to the current directory
 ```
 
 ## Keys
@@ -46,5 +46,5 @@ markdup [directory]   # defaults to the current directory
 - Edits autosave on file switch, on quit, and after ~2s idle.
 - Writes are atomic (temp file + rename) — a crash never truncates a file.
 - If a file changed on disk while your buffer is clean, it reloads
-  silently. If your buffer is dirty, markdup refuses to clobber the disk
+  silently. If your buffer is dirty, mrkdup refuses to clobber the disk
   and asks you to confirm with a second Ctrl+S.

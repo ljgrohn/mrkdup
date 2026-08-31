@@ -1,4 +1,4 @@
-# markdup — design spec
+# mrkdup — design spec
 
 Date: 2026-08-31
 Status: approved
@@ -27,7 +27,7 @@ a thin, fast wrapper around plain files.
 
 ## Layout
 
-- Left pane: file tree rooted at the launch directory (`markdup [path]`,
+- Left pane: file tree rooted at the launch directory (`mrkdup [path]`,
   default cwd). Toggleable.
 - Right pane: editor.
 - Bottom: one-line status bar — relative file path, dirty dot, cursor

@@ -1,10 +1,10 @@
 [package]
-name = "markdup"
+name = "mrkdup"
 version = "0.1.0"
 edition = "2021"
 description = "A terminal markdown editor with a file tree and soft wrap"
 license = "MIT"
-repository = "https://github.com/ljgrohn/markdup"
+repository = "https://github.com/ljgrohn/mrkdup"
 readme = "README.md"
 keywords = ["markdown", "editor", "tui", "terminal"]
 categories = ["command-line-utilities", "text-editors"]

@@ -242,7 +242,7 @@ mod tests {
     ///     bin.dat        (binary, hidden from tree)
     ///     .hidden.md     (dotfile)
     fn fixture(tag: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!("markdup-tree-{tag}"));
+        let root = std::env::temp_dir().join(format!("mrkdup-tree-{tag}"));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("b-dir")).unwrap();
         fs::write(root.join("b-dir/inner.md"), "x\n").unwrap();
@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn empty_directory_yields_no_rows_and_no_panic() {
-        let root = std::env::temp_dir().join("markdup-tree-empty");
+        let root = std::env::temp_dir().join("mrkdup-tree-empty");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let mut t = Tree::new(root).unwrap();
