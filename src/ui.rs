@@ -211,13 +211,16 @@ fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(&app.editor.textarea, inner);
 }
 
-/// Inset a rect by 5% of its width on each side (breathing room for text).
+/// Inset a rect by 5% of its width on each side and 3% of its height on
+/// top (breathing room for text).
 fn with_side_margins(r: Rect) -> Rect {
     let pad = (r.width as u32 * 5 / 100) as u16;
+    let top = (r.height as u32 * 3 / 100) as u16;
     Rect {
         x: r.x + pad,
+        y: r.y + top,
         width: r.width.saturating_sub(pad * 2),
-        ..r
+        height: r.height.saturating_sub(top),
     }
 }
 
@@ -323,11 +326,14 @@ mod tests {
     }
 
     #[test]
-    fn editor_text_gets_five_percent_side_margins() {
-        let r = with_side_margins(ratatui::layout::Rect::new(10, 0, 100, 20));
+    fn editor_text_gets_side_and_top_margins() {
+        let r = with_side_margins(ratatui::layout::Rect::new(10, 0, 100, 100));
         assert_eq!(r.x, 15); // 5% of 100 = 5 cols in
         assert_eq!(r.width, 90); // 5 off each side
+        assert_eq!(r.y, 3); // 3% of 100 = 3 rows down
+        assert_eq!(r.height, 97); // trimmed from the top only
         let tiny = with_side_margins(ratatui::layout::Rect::new(0, 0, 3, 5));
-        assert_eq!(tiny.width, 3); // tiny pane: 5% rounds to 0 pad, no underflow
+        assert_eq!(tiny.width, 3); // tiny pane: percentages round to 0, no underflow
+        assert_eq!(tiny.height, 5);
     }
 }

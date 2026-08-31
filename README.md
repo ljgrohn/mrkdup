@@ -27,7 +27,7 @@ mrkdup [directory]   # defaults to the current directory
 | Context | Key | Action |
 |---|---|---|
 | global | Ctrl+B | show/hide tree pane |
-| global | Ctrl+Q | quit (autosaves; if disk changed, warns — Ctrl+Q again discards) |
+| global | Ctrl+Q / Ctrl+C | quit (autosaves; if disk changed, warns — press again to discard) |
 | editor | Esc / Shift+Tab | focus tree |
 | tree | Enter / Tab | open file (or expand/collapse dir) |
 | tree | j/k, ↑/↓ | move selection |

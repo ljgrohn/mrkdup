@@ -74,7 +74,7 @@ impl App {
         }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match (ctrl, key.code) {
-            (true, KeyCode::Char('q')) => self.do_quit(),
+            (true, KeyCode::Char('q') | KeyCode::Char('c')) => self.do_quit(),
             (true, KeyCode::Char('b')) => {
                 self.tree_visible = !self.tree_visible;
                 if !self.tree_visible {
