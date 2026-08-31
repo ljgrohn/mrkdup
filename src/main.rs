@@ -9,7 +9,11 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{
+    self, Event, KeyEventKind, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
+};
+use crossterm::execute;
 
 fn main() -> io::Result<()> {
     let root = match env::args().nth(1) {
@@ -18,7 +22,20 @@ fn main() -> io::Result<()> {
     };
     let mut app = app::App::new(root)?;
     let mut terminal = ratatui::init();
+    // Without the kitty keyboard protocol, terminals never report the
+    // Cmd/Super modifier (and often not Shift on letters); enable it
+    // where supported so the modifier motions work.
+    let enhanced = crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
+    if enhanced {
+        let _ = execute!(
+            io::stdout(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        );
+    }
     let result = run(&mut terminal, &mut app);
+    if enhanced {
+        let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
+    }
     ratatui::restore();
     result
 }

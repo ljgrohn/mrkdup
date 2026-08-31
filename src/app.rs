@@ -171,6 +171,33 @@ impl App {
                     self.note_edit();
                 }
             }
+            // j/k motions with a modifier held (plain j/k still types):
+            // Shift = up/down, Option = paragraph, Cmd = line start/end
+            (false, KeyCode::Char(c @ ('j' | 'k' | 'J' | 'K')))
+                if key
+                    .modifiers
+                    .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT | KeyModifiers::SUPER) =>
+            {
+                let down = matches!(c, 'j' | 'J');
+                let mv = if key.modifiers.contains(KeyModifiers::SUPER) {
+                    if down {
+                        CursorMove::End
+                    } else {
+                        CursorMove::Head
+                    }
+                } else if key.modifiers.contains(KeyModifiers::ALT) {
+                    if down {
+                        CursorMove::ParagraphForward
+                    } else {
+                        CursorMove::ParagraphBack
+                    }
+                } else if down {
+                    CursorMove::Down
+                } else {
+                    CursorMove::Up
+                };
+                self.editor.textarea.move_cursor(mv);
+            }
             _ => {
                 if self.editor.textarea.input(Input::from(key)) {
                     self.note_edit();
@@ -465,6 +492,41 @@ mod tests {
             app.tree.selected_row().unwrap().path,
             root.canonicalize().unwrap()
         );
+    }
+
+    #[test]
+    fn shift_jk_moves_cursor_without_typing() {
+        let mut app = App::new(fixture("motion")).unwrap();
+        app.handle_key(key(KeyCode::Enter)); // hello / world, cursor (0,0)
+        app.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT));
+        assert_eq!(app.editor.textarea.cursor(), (1, 0));
+        app.handle_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
+        assert_eq!(app.editor.textarea.cursor(), (0, 0));
+        assert_eq!(app.editor.textarea.lines(), ["hello", "world"]); // nothing typed
+        assert!(!app.editor.dirty);
+    }
+
+    #[test]
+    fn alt_jk_jumps_by_paragraph() {
+        let root = fixture("para");
+        fs::write(root.join("a.md"), "one\n\ntwo\n\nthree\n").unwrap();
+        let mut app = App::new(root).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::ALT));
+        let DataCursor(row, _) = app.editor.textarea.cursor();
+        assert!(row >= 1); // moved past the blank line
+        app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::ALT));
+        assert_eq!(app.editor.textarea.cursor(), (0, 0));
+    }
+
+    #[test]
+    fn super_jk_jumps_to_line_end_and_start() {
+        let mut app = App::new(fixture("linejump")).unwrap();
+        app.handle_key(key(KeyCode::Enter)); // hello
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::SUPER));
+        assert_eq!(app.editor.textarea.cursor(), (0, 5)); // end of "hello"
+        app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::SUPER));
+        assert_eq!(app.editor.textarea.cursor(), (0, 0));
     }
 
     #[test]
