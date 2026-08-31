@@ -679,13 +679,17 @@ impl App {
         self.open_file(path);
     }
 
-    /// Literal, case-sensitive, wraps around; starts one char after the cursor.
+    /// Literal, case-insensitive, wraps around; starts one char after the cursor.
     fn search_next(&mut self, query: &str) {
         if query.is_empty() {
             return;
         }
-        // highlight every match of the (escaped, so literal) query
-        let _ = self.editor.textarea.set_search_pattern(regex_escape(query));
+        // highlight every match of the (escaped, so literal) query,
+        // (?i) making the highlight case-insensitive like the jump
+        let _ = self
+            .editor
+            .textarea
+            .set_search_pattern(format!("(?i){}", regex_escape(query)));
         let DataCursor(crow, ccol) = self.editor.textarea.cursor();
         let lines: Vec<String> = self.editor.textarea.lines().to_vec();
         let n = lines.len();
@@ -693,13 +697,7 @@ impl App {
             let row = (crow + i) % n;
             let hay = &lines[row];
             let from_char = if i == 0 { ccol + 1 } else { 0 };
-            let from_byte = hay
-                .char_indices()
-                .nth(from_char)
-                .map(|(b, _)| b)
-                .unwrap_or(hay.len());
-            if let Some(b) = hay[from_byte..].find(query) {
-                let cpos = hay[..from_byte + b].chars().count();
+            if let Some(cpos) = find_ci(hay, query, from_char) {
                 if row > u16::MAX as usize || cpos > u16::MAX as usize {
                     // Jump takes u16; truncating would land on the wrong line
                     self.status = Some("match is beyond line 65535 — cannot jump".into());
@@ -717,6 +715,23 @@ impl App {
         self.status = Some(format!("not found: {query}"));
         self.last_search = query.to_string();
     }
+}
+
+/// Case-insensitive literal find: the char index of the first match of
+/// `query` in `hay` at or after char index `from_char`.
+fn find_ci(hay: &str, query: &str, from_char: usize) -> Option<usize> {
+    let h: Vec<char> = hay.chars().collect();
+    let q: Vec<char> = query.chars().collect();
+    if q.is_empty() || h.len() < q.len() {
+        return None;
+    }
+    let ci_eq = |a: &char, b: &char| a.to_lowercase().eq(b.to_lowercase());
+    (from_char..=h.len() - q.len()).find(|&start| {
+        h[start..start + q.len()]
+            .iter()
+            .zip(&q)
+            .all(|(a, b)| ci_eq(a, b))
+    })
 }
 
 /// All text files under `root` as (root-relative display path, absolute
@@ -1154,6 +1169,34 @@ mod tests {
             app.handle_key(key(KeyCode::Char(c)));
         }
         assert_eq!(app.editor.textarea.lines()[0], "---0hello");
+    }
+
+    #[test]
+    fn search_is_case_insensitive_both_ways() {
+        let root = fixture("search-ci");
+        fs::write(root.join("a.md"), "Ship it\nfriend ship\n").unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        // all-caps query finds the lowercase occurrence first (search
+        // starts one char after the cursor, skipping "Ship" at 0:0)...
+        app.handle_key(ctrl('f'));
+        for c in "SHIP".chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.editor.textarea.cursor(), (1, 7));
+        // ...and Ctrl+G wraps around to the capitalized one
+        app.handle_key(ctrl('g'));
+        assert_eq!(app.editor.textarea.cursor(), (0, 0));
+    }
+
+    #[test]
+    fn find_ci_handles_unicode_and_offsets() {
+        assert_eq!(find_ci("héLLo héllo", "Éllo", 0), Some(1));
+        assert_eq!(find_ci("héLLo héllo", "Éllo", 2), Some(7));
+        assert_eq!(find_ci("abc", "zzz", 0), None);
+        assert_eq!(find_ci("abc", "", 0), None);
+        assert_eq!(find_ci("ab", "abc", 0), None);
     }
 
     #[test]
