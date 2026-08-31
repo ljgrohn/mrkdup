@@ -274,6 +274,7 @@ impl App {
             (false, KeyCode::Esc) | (_, KeyCode::BackTab) => self.focus = Focus::Tree,
             (true, KeyCode::Char('s')) => self.do_save(),
             (true, KeyCode::Char('f')) => self.prompt = Prompt::Search(String::new()),
+            (true, KeyCode::Char('d')) => self.toggle_checkbox(),
             // crate defaults are Ctrl+U/Ctrl+R with Ctrl+Y = paste;
             // intercept so the advertised keys work
             (true, KeyCode::Char('z')) => {
@@ -325,6 +326,33 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Toggle a markdown checkbox on the cursor's line (Ctrl+D):
+    /// `- [ ]` <-> `- [x]`; a plain `- ` bullet or any other line gains a
+    /// `- [ ] ` prefix after its leading whitespace. Rewrites the line via
+    /// textarea edits so undo works, then keeps the cursor on the same
+    /// character (old column shifted by the prefix growth).
+    fn toggle_checkbox(&mut self) {
+        let DataCursor(row, col) = self.editor.textarea.cursor();
+        let Some(old) = self.editor.textarea.lines().get(row).cloned() else {
+            return;
+        };
+        let new = toggle_checkbox_line(&old);
+        self.editor
+            .textarea
+            .move_cursor(CursorMove::Jump(row as u16, 0));
+        if !old.is_empty() {
+            // an empty line would delete the newline instead — skip
+            self.editor.textarea.delete_line_by_end();
+        }
+        self.editor.textarea.insert_str(&new);
+        let delta = new.chars().count() - old.chars().count();
+        let new_col = (col + delta).min(new.chars().count());
+        self.editor
+            .textarea
+            .move_cursor(CursorMove::Jump(row as u16, new_col as u16));
+        self.note_edit();
     }
 
     /// True when the two chars before the cursor are exactly "--"
@@ -512,6 +540,21 @@ impl App {
         }
         self.status = Some(format!("not found: {query}"));
         self.last_search = query.to_string();
+    }
+}
+
+/// The checkbox-toggled form of `line`, indentation preserved.
+fn toggle_checkbox_line(line: &str) -> String {
+    let indent_end = line.len() - line.trim_start().len();
+    let (indent, rest) = line.split_at(indent_end);
+    if let Some(tail) = rest.strip_prefix("- [ ]") {
+        format!("{indent}- [x]{tail}")
+    } else if let Some(tail) = rest.strip_prefix("- [x]") {
+        format!("{indent}- [ ]{tail}")
+    } else if let Some(tail) = rest.strip_prefix("- ") {
+        format!("{indent}- [ ] {tail}")
+    } else {
+        format!("{indent}- [ ] {rest}")
     }
 }
 
@@ -748,6 +791,84 @@ mod tests {
             app.handle_key(key(KeyCode::Char(c)));
         }
         assert_eq!(app.editor.textarea.lines()[0], "---0hello");
+    }
+
+    #[test]
+    fn ctrl_d_checks_an_unchecked_checkbox() {
+        let root = fixture("cb-check");
+        fs::write(root.join("a.md"), "- [ ] milk\n").unwrap();
+        let mut app = App::new(root).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(ctrl('d'));
+        assert_eq!(app.editor.textarea.lines()[0], "- [x] milk");
+        assert_eq!(app.editor.textarea.cursor(), (0, 0)); // same width: cursor stays
+        assert!(app.editor.dirty);
+    }
+
+    #[test]
+    fn ctrl_d_unchecks_a_checked_checkbox() {
+        let root = fixture("cb-uncheck");
+        fs::write(root.join("a.md"), "- [x] milk\n").unwrap();
+        let mut app = App::new(root).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(ctrl('d'));
+        assert_eq!(app.editor.textarea.lines()[0], "- [ ] milk");
+    }
+
+    #[test]
+    fn ctrl_d_turns_a_bullet_into_a_checkbox() {
+        let root = fixture("cb-bullet");
+        fs::write(root.join("a.md"), "- milk\n").unwrap();
+        let mut app = App::new(root).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(ctrl('d'));
+        assert_eq!(app.editor.textarea.lines()[0], "- [ ] milk");
+    }
+
+    #[test]
+    fn ctrl_d_prefixes_a_plain_line_and_shifts_the_cursor() {
+        let root = fixture("cb-plain");
+        let mut app = App::new(root).unwrap();
+        app.handle_key(key(KeyCode::Enter)); // "hello", cursor (0,0)
+        app.handle_key(ctrl('d'));
+        assert_eq!(app.editor.textarea.lines()[0], "- [ ] hello");
+        assert_eq!(app.editor.textarea.cursor(), (0, 6)); // still on the 'h'
+    }
+
+    #[test]
+    fn ctrl_d_preserves_indentation() {
+        let root = fixture("cb-indent");
+        fs::write(root.join("a.md"), "  - [ ] a\n    plain\n").unwrap();
+        let mut app = App::new(root).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(ctrl('d'));
+        assert_eq!(app.editor.textarea.lines()[0], "  - [x] a");
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        app.handle_key(ctrl('d'));
+        assert_eq!(app.editor.textarea.lines()[1], "    - [ ] plain");
+    }
+
+    #[test]
+    fn ctrl_d_on_an_empty_line_does_not_join_the_next_line() {
+        let root = fixture("cb-empty");
+        fs::write(root.join("a.md"), "\nworld\n").unwrap();
+        let mut app = App::new(root).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(ctrl('d'));
+        assert_eq!(app.editor.textarea.lines(), ["- [ ] ", "world"]);
+    }
+
+    #[test]
+    fn ctrl_d_is_undoable() {
+        let root = fixture("cb-undo");
+        let mut app = App::new(root).unwrap();
+        app.handle_key(key(KeyCode::Enter)); // "hello"
+        app.handle_key(ctrl('d'));
+        assert_eq!(app.editor.textarea.lines()[0], "- [ ] hello");
+        // the toggle is a delete + an insert, so two undo steps
+        app.handle_key(ctrl('z'));
+        app.handle_key(ctrl('z'));
+        assert_eq!(app.editor.textarea.lines()[0], "hello");
     }
 
     #[test]

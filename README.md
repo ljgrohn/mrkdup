@@ -43,6 +43,7 @@ mrkdup [directory]   # defaults to the current directory
 | tree | . | toggle hidden files |
 | editor | Ctrl+S | save (after a disk-conflict warning, a second Ctrl+S overwrites) |
 | editor | Ctrl+Z / Ctrl+Y | undo / redo |
+| editor | Ctrl+D | toggle checkbox on the line (`- [ ]` ↔ `- [x]`; other lines gain a `- [ ] ` prefix) |
 | editor | Ctrl+F | search in file (Enter jumps; empty search repeats the last one) |
 | editor | Opt+J / Opt+K | next / previous paragraph |
 | editor | Cmd+J / Cmd+K | end / start of line |
