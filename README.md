@@ -33,13 +33,24 @@ mrkdup [directory]   # defaults to the current directory
 | tree | j/k, ↑/↓ | move selection |
 | tree | h/l, ←/→ | collapse / expand |
 | tree | g / G | jump to top / bottom |
-| tree | n | new file (prompt; `dir/name.md` paths allowed) |
+| tree | n | new file (popup; `dir/name.md` paths allowed) |
+| tree | m | move the selected file (popup lists directories) |
+| tree | Shift+X | delete the selected file (confirm popup, No by default; Shift+X again confirms) |
+| tree | r | refresh the tree (it also auto-refreshes every ~2s) |
 | tree | - | go up: re-root the tree at the parent directory |
 | tree | + | zoom in: make the selected folder the tree root (a file: its folder) |
 | tree | . | toggle hidden files |
 | editor | Ctrl+S | save (after a disk-conflict warning, a second Ctrl+S overwrites) |
 | editor | Ctrl+Z / Ctrl+Y | undo / redo |
 | editor | Ctrl+F | search in file (Enter jumps; empty search repeats the last one) |
+| editor | Shift+J / Shift+K | cursor down / up |
+| editor | Opt+J / Opt+K | next / previous paragraph |
+| editor | Cmd+J / Cmd+K | end / start of line |
+
+The modifier motions need a terminal that supports the kitty keyboard
+protocol (Ghostty, kitty, WezTerm, recent iTerm2) — mrkdup enables it
+automatically where available. In terminals without it, Cmd never reaches
+the app, and Option needs "Use Option as Meta/Esc+" turned on.
 
 ## Saving model
 
