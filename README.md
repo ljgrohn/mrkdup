@@ -1,0 +1,46 @@
+# markdup
+
+A terminal markdown editor: a collapsible file tree on the left, a
+soft-wrapping raw-text editor on the right. A thin, fast wrapper around
+plain files — it autosaves, writes atomically, and picks up external
+changes without clobbering yours.
+
+The tree shows directories and any text-based file (detected by content,
+not extension), honors `.gitignore`, and lazy-loads as you expand.
+
+## Install
+
+```sh
+cargo install --path .
+```
+
+## Use
+
+```sh
+markdup [directory]   # defaults to the current directory
+```
+
+## Keys
+
+| Context | Key | Action |
+|---|---|---|
+| global | Ctrl+B | show/hide tree pane |
+| global | Ctrl+Q | quit (autosaves; if disk changed, warns — Ctrl+Q again discards) |
+| editor | Esc | focus tree |
+| tree | Enter / Tab | open file (or expand/collapse dir) |
+| tree | j/k, ↑/↓ | move selection |
+| tree | h/l, ←/→ | collapse / expand |
+| tree | g / G | jump to top / bottom |
+| tree | n | new file (prompt; `dir/name.md` paths allowed) |
+| tree | . | toggle hidden files |
+| editor | Ctrl+S | save (after a disk-conflict warning, a second Ctrl+S overwrites) |
+| editor | Ctrl+Z / Ctrl+Y | undo / redo |
+| editor | Ctrl+F | search in file (Enter jumps; empty search repeats the last one) |
+
+## Saving model
+
+- Edits autosave on file switch, on quit, and after ~2s idle.
+- Writes are atomic (temp file + rename) — a crash never truncates a file.
+- If a file changed on disk while your buffer is clean, it reloads
+  silently. If your buffer is dirty, markdup refuses to clobber the disk
+  and asks you to confirm with a second Ctrl+S.
