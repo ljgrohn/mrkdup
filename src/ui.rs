@@ -52,6 +52,56 @@ fn popup_block(title: &str) -> Block<'_> {
 }
 
 fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
+    if let Prompt::MoveFile {
+        src,
+        dests,
+        selected,
+    } = &app.prompt
+    {
+        let name = src.file_name().unwrap_or_default().to_string_lossy();
+        let title = format!(" Move {name} to… ");
+        let names: Vec<String> = dests
+            .iter()
+            .map(|d| {
+                if d == app.tree.root() {
+                    "./".into()
+                } else {
+                    let rel = d.strip_prefix(app.tree.root()).unwrap_or(d);
+                    format!("{}/", rel.to_string_lossy())
+                }
+            })
+            .collect();
+        let width = names
+            .iter()
+            .map(|n| n.len())
+            .max()
+            .unwrap_or(10)
+            .max(title.len()) as u16
+            + 6;
+        let height = (names.len() as u16 + 2).min(area.height);
+        let popup = centered_rect(width.max(30), height, area);
+        f.render_widget(Clear, popup);
+        let block = popup_block(&title);
+        let inner = block.inner(popup);
+        f.render_widget(block, popup);
+        // keep the selection visible if the list is taller than the popup
+        let visible = inner.height as usize;
+        let top = selected.saturating_sub(visible.saturating_sub(1));
+        let lines: Vec<Line> = names
+            .iter()
+            .enumerate()
+            .skip(top)
+            .take(visible)
+            .map(|(i, n)| {
+                let mut line = Line::from(format!(" {n} "));
+                if i == *selected {
+                    line = line.style(Style::default().add_modifier(Modifier::REVERSED));
+                }
+                line
+            })
+            .collect();
+        f.render_widget(Paragraph::new(lines), inner);
+    }
     if let Prompt::ConfirmDelete { path, yes } = &app.prompt {
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         let popup = centered_rect((name.len() as u16 + 16).max(30), 5, area);
@@ -166,7 +216,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     let text = match &app.prompt {
         Prompt::NewFile(s) => format!("{mode}| new file: {s}"),
         Prompt::Search(s) => format!("{mode}| search: {s}"),
-        Prompt::ConfirmDelete { .. } => {
+        Prompt::ConfirmDelete { .. } | Prompt::MoveFile { .. } => {
             format!("{mode}| j/k choose · Enter confirm · Esc cancel")
         }
         Prompt::None => {

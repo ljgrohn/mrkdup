@@ -19,7 +19,15 @@ pub enum Prompt {
     None,
     NewFile(String),
     Search(String),
-    ConfirmDelete { path: PathBuf, yes: bool },
+    ConfirmDelete {
+        path: PathBuf,
+        yes: bool,
+    },
+    MoveFile {
+        src: PathBuf,
+        dests: Vec<PathBuf>,
+        selected: usize,
+    },
 }
 
 pub struct App {
@@ -111,9 +119,61 @@ impl App {
             KeyCode::Char('+') => self.tree.make_root(),
             KeyCode::Char('n') => self.prompt = Prompt::NewFile(String::new()),
             KeyCode::Char('X') => self.confirm_delete(),
+            KeyCode::Char('m') => self.start_move(),
             KeyCode::Enter | KeyCode::Tab => self.open_selected(),
             _ => {}
         }
+    }
+
+    fn start_move(&mut self) {
+        match self.tree.selected_row() {
+            Some(r) if !r.is_dir => {
+                let src = r.path.clone();
+                // destinations: the root plus every directory in the tree
+                let mut dests = vec![self.tree.root().to_path_buf()];
+                dests.extend(
+                    self.tree
+                        .rows()
+                        .iter()
+                        .filter(|row| row.is_dir)
+                        .map(|row| row.path.clone()),
+                );
+                self.prompt = Prompt::MoveFile {
+                    src,
+                    dests,
+                    selected: 0,
+                };
+            }
+            Some(_) => self.status = Some("can only move files".into()),
+            None => {}
+        }
+    }
+
+    fn move_file(&mut self, src: PathBuf, dest_dir: PathBuf) {
+        let Some(name) = src.file_name() else { return };
+        let target = dest_dir.join(name);
+        if target == src {
+            self.status = Some("already there".into());
+            return;
+        }
+        if target.exists() {
+            self.status = Some("a file with that name is already there".into());
+            return;
+        }
+        if let Err(e) = std::fs::rename(&src, &target) {
+            self.status = Some(format!("move failed: {e}"));
+            return;
+        }
+        if self.editor.path.as_deref() == Some(src.as_path()) {
+            self.editor.path = Some(target.clone());
+        }
+        self.tree.refresh();
+        let shown = target
+            .strip_prefix(self.tree.root())
+            .unwrap_or(&target)
+            .to_string_lossy()
+            .into_owned();
+        self.status = Some(format!("moved to {shown}"));
     }
 
     fn confirm_delete(&mut self) {
@@ -323,6 +383,24 @@ impl App {
                     if yes {
                         self.delete_file(p);
                     }
+                }
+                _ => {}
+            },
+            Prompt::MoveFile {
+                src,
+                dests,
+                selected,
+            } => match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    *selected = (*selected + 1).min(dests.len().saturating_sub(1));
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    *selected = selected.saturating_sub(1);
+                }
+                KeyCode::Enter => {
+                    let (s, d) = (src.clone(), dests[*selected].clone());
+                    self.prompt = Prompt::None;
+                    self.move_file(s, d);
                 }
                 _ => {}
             },
@@ -664,6 +742,66 @@ mod tests {
         assert!(matches!(app.prompt, Prompt::None));
         assert!(app.status.is_some());
         assert!(root.join("docs").exists());
+    }
+
+    #[test]
+    fn m_moves_file_into_chosen_directory() {
+        let root = fixture("move");
+        fs::create_dir_all(root.join("docs")).unwrap();
+        let mut app = App::new(root.clone()).unwrap();
+        app.handle_key(key(KeyCode::Char('j'))); // docs(0) -> a.md(1)
+        app.handle_key(key(KeyCode::Char('m')));
+        assert!(matches!(app.prompt, Prompt::MoveFile { .. }));
+        app.handle_key(key(KeyCode::Char('j'))); // root -> docs
+        app.handle_key(key(KeyCode::Enter));
+        assert!(root.join("docs/a.md").exists());
+        assert!(!root.join("a.md").exists());
+    }
+
+    #[test]
+    fn m_on_directory_is_refused() {
+        let root = fixture("move-dir");
+        fs::create_dir_all(root.join("docs")).unwrap();
+        let mut app = App::new(root).unwrap();
+        app.handle_key(key(KeyCode::Char('m'))); // docs selected
+        assert!(matches!(app.prompt, Prompt::None));
+        assert!(app.status.is_some());
+    }
+
+    #[test]
+    fn moving_the_open_file_keeps_editing_it_at_the_new_path() {
+        let root = fixture("move-open");
+        fs::create_dir_all(root.join("docs")).unwrap();
+        let mut app = App::new(root.clone()).unwrap();
+        app.handle_key(key(KeyCode::Char('j')));
+        app.handle_key(key(KeyCode::Enter)); // open a.md
+        app.handle_key(key(KeyCode::Esc));
+        app.handle_key(key(KeyCode::Char('m')));
+        app.handle_key(key(KeyCode::Char('j'))); // docs
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(
+            app.editor.path.as_deref(),
+            Some(root.canonicalize().unwrap().join("docs/a.md").as_path())
+        );
+        // edits still save to the new location
+        app.focus = Focus::Editor;
+        app.handle_key(key(KeyCode::Char('Z')));
+        app.handle_key(ctrl('s'));
+        assert!(fs::read_to_string(root.join("docs/a.md"))
+            .unwrap()
+            .starts_with('Z'));
+    }
+
+    #[test]
+    fn move_to_same_directory_is_rejected() {
+        let root = fixture("move-same");
+        fs::create_dir_all(root.join("docs")).unwrap();
+        let mut app = App::new(root.clone()).unwrap();
+        app.handle_key(key(KeyCode::Char('j'))); // a.md
+        app.handle_key(key(KeyCode::Char('m')));
+        app.handle_key(key(KeyCode::Enter)); // first dest is root = current dir
+        assert!(root.join("a.md").exists());
+        assert!(app.status.is_some());
     }
 
     #[test]

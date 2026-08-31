@@ -2,7 +2,7 @@
 
 - [x] in tree shift x should create a pop up that says delete file? This should be the file that was highlighted. No should be highlighted be default and esc should close the promp. j/k should move the yes/no highlight as should the arrow keys. In the pompt box hitting shift x again should select the delete file option. @done(2026-08-31 16:19)
 
-- [ ] pressing m in tree should create a pop up that allows you to select where to move the highlighted file
+- [x] pressing m in tree should create a pop up that allows you to select where to move the highlighted file @done(2026-08-31 16:26)
 
 - [ ] when pressing n for a new file, I don't like that it is down at the bottom. Instead, make a pop up with the naming prompt
 
