@@ -84,7 +84,8 @@ impl App {
                     self.focus = Focus::Editor;
                 }
             }
-            (true, KeyCode::Char('e')) => {
+            // Ctrl+T, not Ctrl+E: macOS terminals send Ctrl+E for Cmd+Right
+            (true, KeyCode::Char('t')) => {
                 self.editor_visible = !self.editor_visible;
                 if !self.editor_visible {
                     self.tree_visible = true; // never hide both panes
@@ -597,9 +598,9 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_e_hides_editor_and_opening_a_file_reshows_it() {
+    fn ctrl_t_hides_editor_and_opening_a_file_reshows_it() {
         let mut app = App::new(fixture("epane")).unwrap();
-        app.handle_key(ctrl('e'));
+        app.handle_key(ctrl('t'));
         assert!(!app.editor_visible);
         assert!(app.tree_visible);
         assert!(matches!(app.focus, Focus::Tree));
@@ -611,11 +612,11 @@ mod tests {
     #[test]
     fn panes_can_never_both_be_hidden() {
         let mut app = App::new(fixture("panes")).unwrap();
-        app.handle_key(ctrl('e')); // editor hidden
+        app.handle_key(ctrl('t')); // editor hidden
         app.handle_key(ctrl('b')); // hide tree -> editor must come back
         assert!(app.editor_visible);
         assert!(!app.tree_visible);
-        app.handle_key(ctrl('e')); // hide editor -> tree must come back
+        app.handle_key(ctrl('t')); // hide editor -> tree must come back
         assert!(app.tree_visible);
         assert!(!app.editor_visible);
     }
