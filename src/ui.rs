@@ -275,6 +275,16 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
             let dirty = if app.editor.dirty { "*" } else { "" };
             let DataCursor(row, col) = app.editor.textarea.cursor();
             let mut s = format!("{mode}| {path}{dirty}  {}:{}", row + 1, col + 1);
+            if app.editor.path.is_some() {
+                let words: usize = app
+                    .editor
+                    .textarea
+                    .lines()
+                    .iter()
+                    .map(|l| l.split_whitespace().count())
+                    .sum();
+                s.push_str(&format!(" · {words} words"));
+            }
             if let Some(msg) = &app.status {
                 s.push_str("  —  ");
                 s.push_str(msg);
@@ -346,6 +356,30 @@ mod tests {
         let text = format!("{:?}", terminal.backend().buffer());
         assert!(text.contains("New file")); // popup title
         assert!(text.contains("z")); // typed input shown in the popup
+    }
+
+    #[test]
+    fn status_bar_shows_word_count_only_when_a_file_is_open() {
+        let root = std::env::temp_dir().join("mrkdup-ui-wc");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("a.md"), "one two three\nfour\n").unwrap();
+        let mut app = App::new(root).unwrap();
+        let backend = TestBackend::new(60, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        // no file open yet: no word count
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let text = format!("{:?}", terminal.backend().buffer());
+        assert!(!text.contains("words"));
+
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let text = format!("{:?}", terminal.backend().buffer());
+        assert!(text.contains("4 words"));
     }
 
     #[test]

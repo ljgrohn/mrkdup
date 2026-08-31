@@ -8,7 +8,8 @@ changes without clobbering yours.
 The tree shows directories and any text-based file (detected by content,
 not extension), honors `.gitignore`, and lazy-loads as you expand. Press
 `-` to climb above the directory you launched in. The focused pane has a
-cyan border, and the status bar shows `TREE` or `EDIT`.
+cyan border, and the status bar shows `TREE` or `EDIT`, the cursor
+position, and a live word count for the open file.
 
 ## Install
 
