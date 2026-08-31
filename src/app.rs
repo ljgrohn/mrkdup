@@ -249,7 +249,11 @@ impl App {
         if target == src {
             return; // unchanged
         }
-        if target.exists() {
+        // on case-insensitive filesystems (macOS default) a case-only
+        // rename makes target "exist" — but it's the same file, allow it
+        let same_file = target.exists()
+            && std::fs::canonicalize(&target).ok() == std::fs::canonicalize(src).ok();
+        if target.exists() && !same_file {
             self.status = Some("a file with that name already exists".into());
             return;
         }
@@ -345,6 +349,15 @@ impl App {
     }
 
     fn editor_key(&mut self, key: KeyEvent) {
+        // no file open: the welcome pane covers the textarea, so typing
+        // would silently go into a buffer that can never be saved
+        if self.editor.path.is_none() {
+            match key.code {
+                KeyCode::Esc | KeyCode::BackTab => self.focus = Focus::Tree,
+                _ => self.status = Some("no file open — pick one in the tree (Esc)".into()),
+            }
+            return;
+        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match (ctrl, key.code) {
             // Shift+Tab arrives as BackTab; treat it like Esc
@@ -419,14 +432,16 @@ impl App {
     /// textarea edits so undo works, then keeps the cursor on the same
     /// character (old column shifted by the prefix growth).
     fn toggle_checkbox(&mut self) {
+        // an active selection would make the moves below extend it and
+        // delete_line_by_end would then eat the whole selection
+        self.editor.textarea.cancel_selection();
         let DataCursor(row, col) = self.editor.textarea.cursor();
         let Some(old) = self.editor.textarea.lines().get(row).cloned() else {
             return;
         };
         let new = toggle_checkbox_line(&old);
-        self.editor
-            .textarea
-            .move_cursor(CursorMove::Jump(row as u16, 0));
+        // Head, not Jump(row as u16, _): u16 would truncate past line 65535
+        self.editor.textarea.move_cursor(CursorMove::Head);
         if !old.is_empty() {
             // an empty line would delete the newline instead — skip
             self.editor.textarea.delete_line_by_end();
@@ -434,9 +449,11 @@ impl App {
         self.editor.textarea.insert_str(&new);
         let delta = new.chars().count() - old.chars().count();
         let new_col = (col + delta).min(new.chars().count());
-        self.editor
-            .textarea
-            .move_cursor(CursorMove::Jump(row as u16, new_col as u16));
+        if row <= u16::MAX as usize && new_col <= u16::MAX as usize {
+            self.editor
+                .textarea
+                .move_cursor(CursorMove::Jump(row as u16, new_col as u16));
+        }
         self.note_edit();
     }
 
@@ -675,6 +692,13 @@ impl App {
                 .unwrap_or(hay.len());
             if let Some(b) = hay[from_byte..].find(query) {
                 let cpos = hay[..from_byte + b].chars().count();
+                if row > u16::MAX as usize || cpos > u16::MAX as usize {
+                    // Jump takes u16; truncating would land on the wrong line
+                    self.status = Some("match is beyond line 65535 — cannot jump".into());
+                    self.last_search = query.to_string();
+                    return;
+                }
+                self.editor.textarea.cancel_selection();
                 self.editor
                     .textarea
                     .move_cursor(CursorMove::Jump(row as u16, cpos as u16));
@@ -731,7 +755,9 @@ fn fuzzy_score(query: &str, candidate: &str) -> Option<(usize, usize, usize)> {
     let q: Vec<char> = query.to_lowercase().chars().collect();
     let c: Vec<char> = candidate.to_lowercase().chars().collect();
     if q.is_empty() {
-        return Some((0, 0, c.len()));
+        // constant score: the stable sort keeps the alphabetical
+        // candidate order for the just-opened, un-filtered popup
+        return Some((0, 0, 0));
     }
     let mut positions = Vec::with_capacity(q.len());
     let mut from = 0;
@@ -1145,6 +1171,35 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_d_with_active_selection_only_touches_cursor_line() {
+        let root = fixture("cb-selection");
+        fs::write(root.join("a.md"), "alpha\nbravo\ncharlie\n").unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        // select two lines with Shift+Down, then toggle
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT));
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT));
+        app.handle_key(ctrl('d'));
+        assert_eq!(
+            app.editor.textarea.lines(),
+            ["alpha", "bravo", "- [ ] charlie"]
+        );
+    }
+
+    #[test]
+    fn typing_with_no_file_open_is_ignored() {
+        let root = fixture("no-file-typing");
+        let mut app = App::new(root, Config::default()).unwrap();
+        app.handle_key(ctrl('b')); // hide tree -> editor focus, no file
+        app.handle_key(key(KeyCode::Char('x')));
+        assert_eq!(app.editor.textarea.lines(), [""]); // nothing typed
+        assert!(!app.editor.dirty);
+        assert!(app.status.is_some()); // told the user why
+        app.handle_key(key(KeyCode::Esc));
+        assert!(matches!(app.focus, Focus::Tree)); // Esc still escapes
+    }
+
+    #[test]
     fn ctrl_d_turns_a_bullet_into_a_checkbox() {
         let root = fixture("cb-bullet");
         fs::write(root.join("a.md"), "- milk\n").unwrap();
@@ -1402,6 +1457,22 @@ mod tests {
         assert!(root.join("z.md").exists());
         assert!(!root.join("a.md").exists());
         assert_eq!(app.tree.selected_row().unwrap().name, "z.md");
+    }
+
+    #[test]
+    fn rename_to_case_variant_of_itself_works() {
+        // on case-insensitive filesystems (macOS default) A.md "exists"
+        // when a.md does — a case-only rename must still go through
+        let root = fixture("ren-case");
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
+        rename_to(&mut app, 4, "A.md");
+        assert!(root.join("A.md").exists());
+        let names: Vec<String> = fs::read_dir(&root)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(names.contains(&"A.md".to_string()));
+        assert!(!names.contains(&"a.md".to_string()));
     }
 
     #[test]

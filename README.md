@@ -68,7 +68,8 @@ optional — no file means all defaults — and it never causes a crash:
 lines that can't be parsed (or name an unknown option) are ignored, with
 a one-line warning in the status bar.
 
-The format is plain `key = value` lines; `#` starts a comment and blank
+The format is plain `key = value` lines; a line starting with `#` is a
+comment (inline comments after a value are not supported) and blank
 lines are fine. Values are whole numbers; out-of-range values are
 clamped into the ranges below.
 
