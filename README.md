@@ -5,6 +5,13 @@ soft-wrapping raw-text editor on the right. A thin, fast wrapper around
 plain files — it autosaves, writes atomically, and picks up external
 changes without clobbering yours.
 
+The editor styles markdown live as you type — headings by level,
+bold/italic, inline and fenced code, checkboxes (done items dimmed),
+blockquotes, links, YAML frontmatter — plus HTML tag/attribute/string
+coloring in `.html` files and for inline HTML in markdown. Every
+character stays visible; syntax marks are dimmed, never hidden, so the
+layout never shifts under your cursor.
+
 Until you open a file, the editor pane shows a short key cheat sheet;
 it disappears the moment a file opens.
 

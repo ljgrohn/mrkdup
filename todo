@@ -1,9 +1,8 @@
-- [ ] Live markdown styling in the editor (the big one)
-  Obsidian-style inline rendering while editing raw text: bold/colored
-  headings, styled `- [ ]` checkboxes, dimmed syntax marks (`**`, `#`),
-  styled blockquotes and code fences. Means taking over line rendering
-  from ratatui-textarea, so it needs a design conversation before code:
-  scope which elements, and whether marks hide on non-cursor lines.
+- [x] Live markdown styling in the editor (the big one) @done(2026-08-31 20:14)
+  Shipped: custom renderer over the textarea engine (render.rs + pure
+  highlight.rs tokenizer + wrap.rs). Full markdown set, HTML tags, and
+  YAML frontmatter; marks stay visible, dimmed. Mark-hiding on
+  non-cursor lines deliberately deferred — it can layer on later.
 
 - [ ] Ship it properly: crates.io + releases
   Publish `mrkdup` to crates.io (grabs the name), tag v0.1.0, add a CI
