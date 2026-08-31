@@ -78,14 +78,11 @@ impl App {
 
     /// Idle autosave + external-change pickup; called when input is quiet.
     pub fn tick(&mut self) {
-        if self.editor.dirty
-            && self.last_edit.is_some_and(|t| t.elapsed() >= IDLE_AUTOSAVE)
-        {
+        if self.editor.dirty && self.last_edit.is_some_and(|t| t.elapsed() >= IDLE_AUTOSAVE) {
             match self.editor.save(false) {
                 Ok(SaveOutcome::Saved) => self.status = Some("saved".into()),
                 Ok(SaveOutcome::Conflict) => {
-                    self.status =
-                        Some("disk changed — Ctrl+S again to overwrite".into());
+                    self.status = Some("disk changed — Ctrl+S again to overwrite".into());
                     self.force_next_save = true;
                     self.last_edit = None; // don't retry until the next edit
                 }
@@ -118,7 +115,9 @@ impl App {
     }
 
     fn open_selected(&mut self) {
-        let Some(row) = self.tree.selected_row() else { return };
+        let Some(row) = self.tree.selected_row() else {
+            return;
+        };
         if row.is_dir {
             self.tree.toggle();
         } else {
@@ -131,9 +130,7 @@ impl App {
     fn open_file(&mut self, path: PathBuf) {
         match self.editor.save(false) {
             Ok(SaveOutcome::Conflict) => {
-                self.status = Some(
-                    "unsaved changes conflict with disk — Ctrl+S to resolve".into(),
-                );
+                self.status = Some("unsaved changes conflict with disk — Ctrl+S to resolve".into());
                 self.force_next_save = true;
                 self.focus = Focus::Editor;
                 return;
@@ -213,9 +210,8 @@ impl App {
         }
         match self.editor.save(false) {
             Ok(SaveOutcome::Conflict) => {
-                self.status = Some(
-                    "disk changed — Ctrl+S to overwrite, Ctrl+Q again to discard".into(),
-                );
+                self.status =
+                    Some("disk changed — Ctrl+S to overwrite, Ctrl+Q again to discard".into());
                 self.pending_quit = true;
             }
             Err(e) => {
@@ -263,20 +259,13 @@ impl App {
 
     fn submit_new_file(&mut self, name: &str) {
         let name = name.trim();
-        if name.is_empty()
-            || name.starts_with('/')
-            || name.split('/').any(|part| part == "..")
-        {
+        if name.is_empty() || name.starts_with('/') || name.split('/').any(|part| part == "..") {
             self.status = Some("invalid file name".into());
             return;
         }
         let base = match self.tree.selected_row() {
             Some(r) if r.is_dir => r.path.clone(),
-            Some(r) => r
-                .path
-                .parent()
-                .unwrap_or(self.tree.root())
-                .to_path_buf(),
+            Some(r) => r.path.parent().unwrap_or(self.tree.root()).to_path_buf(),
             None => self.tree.root().to_path_buf(),
         };
         let path = base.join(name);
@@ -382,7 +371,10 @@ mod tests {
         app.handle_key(key(KeyCode::Esc));
         app.handle_key(key(KeyCode::Char('j'))); // b.md
         app.handle_key(key(KeyCode::Enter)); // open b.md -> autosaves a.md
-        assert_eq!(fs::read_to_string(root.join("a.md")).unwrap(), "Xhello\nworld\n");
+        assert_eq!(
+            fs::read_to_string(root.join("a.md")).unwrap(),
+            "Xhello\nworld\n"
+        );
         assert_eq!(app.editor.textarea.lines(), ["bee"]);
     }
 
@@ -416,7 +408,10 @@ mod tests {
         app.handle_key(key(KeyCode::Char('Q')));
         app.handle_key(ctrl('q'));
         assert!(app.should_quit);
-        assert_eq!(fs::read_to_string(root.join("a.md")).unwrap(), "Qhello\nworld\n");
+        assert_eq!(
+            fs::read_to_string(root.join("a.md")).unwrap(),
+            "Qhello\nworld\n"
+        );
     }
 
     #[test]
@@ -502,6 +497,9 @@ mod tests {
         app.last_edit = Some(std::time::Instant::now() - std::time::Duration::from_secs(3));
         app.tick();
         assert!(!app.editor.dirty);
-        assert_eq!(fs::read_to_string(root.join("a.md")).unwrap(), "Yhello\nworld\n");
+        assert_eq!(
+            fs::read_to_string(root.join("a.md")).unwrap(),
+            "Yhello\nworld\n"
+        );
     }
 }

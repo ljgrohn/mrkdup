@@ -21,9 +21,13 @@ pub fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
 /// A file is "text" if its first 8KB contain no NUL byte.
 /// Unreadable/missing files are not text.
 pub fn is_text_file(path: &Path) -> bool {
-    let Ok(mut f) = File::open(path) else { return false };
+    let Ok(mut f) = File::open(path) else {
+        return false;
+    };
     let mut buf = [0u8; 8192];
-    let Ok(n) = f.read(&mut buf) else { return false };
+    let Ok(n) = f.read(&mut buf) else {
+        return false;
+    };
     !buf[..n].contains(&0)
 }
 

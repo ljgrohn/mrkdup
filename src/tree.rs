@@ -23,7 +23,10 @@ impl Tree {
     pub fn new(root: PathBuf) -> io::Result<Tree> {
         let root = root.canonicalize()?;
         if !root.is_dir() {
-            return Err(io::Error::new(io::ErrorKind::NotADirectory, "not a directory"));
+            return Err(io::Error::new(
+                io::ErrorKind::NotADirectory,
+                "not a directory",
+            ));
         }
         let mut tree = Tree {
             root,
@@ -69,7 +72,9 @@ impl Tree {
     }
 
     pub fn expand(&mut self) {
-        let Some(row) = self.selected_row() else { return };
+        let Some(row) = self.selected_row() else {
+            return;
+        };
         if row.is_dir {
             self.expanded.insert(row.path.clone());
             self.rebuild_keeping_selection();
@@ -79,7 +84,9 @@ impl Tree {
     /// Collapse an expanded dir; on a file or collapsed dir, move
     /// selection to the parent row if it is in the tree.
     pub fn collapse(&mut self) {
-        let Some(row) = self.selected_row() else { return };
+        let Some(row) = self.selected_row() else {
+            return;
+        };
         if row.is_dir && row.expanded {
             let path = row.path.clone();
             self.expanded.retain(|p| !p.starts_with(&path));
@@ -92,7 +99,9 @@ impl Tree {
     }
 
     pub fn toggle(&mut self) {
-        let Some(row) = self.selected_row() else { return };
+        let Some(row) = self.selected_row() else {
+            return;
+        };
         if row.is_dir && row.expanded {
             self.collapse();
         } else {
@@ -104,7 +113,9 @@ impl Tree {
     /// visible as an expanded, selected row so you keep your place.
     /// No-op at the filesystem root.
     pub fn ascend(&mut self) {
-        let Some(parent) = self.root.parent().map(|p| p.to_path_buf()) else { return };
+        let Some(parent) = self.root.parent().map(|p| p.to_path_buf()) else {
+            return;
+        };
         let old_root = std::mem::replace(&mut self.root, parent);
         self.expanded.insert(old_root.clone());
         self.rebuild();
@@ -118,7 +129,9 @@ impl Tree {
     /// Re-root the tree at the selected directory (or, for a file, its
     /// parent directory). Inverse of `ascend`.
     pub fn make_root(&mut self) {
-        let Some(row) = self.selected_row() else { return };
+        let Some(row) = self.selected_row() else {
+            return;
+        };
         let new_root = if row.is_dir {
             row.path.clone()
         } else {
@@ -166,7 +179,13 @@ impl Tree {
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
             let expanded = is_dir && self.expanded.contains(&path);
-            self.rows.push(Row { path: path.clone(), name, depth, is_dir, expanded });
+            self.rows.push(Row {
+                path: path.clone(),
+                name,
+                depth,
+                is_dir,
+                expanded,
+            });
             if expanded {
                 self.push_children(&path, depth + 1);
             }
@@ -298,7 +317,10 @@ mod tests {
         t.expand();
         fs::write(root.join("b-dir/new.md"), "n\n").unwrap();
         t.refresh();
-        assert_eq!(names(&t), vec!["b-dir", "inner.md", "new.md", "a.md", "zz.md"]);
+        assert_eq!(
+            names(&t),
+            vec!["b-dir", "inner.md", "new.md", "a.md", "zz.md"]
+        );
     }
 
     #[test]
@@ -314,7 +336,10 @@ mod tests {
         assert!(sel.is_dir && sel.expanded);
         // ...its children (and the previously expanded subdir's) still show
         assert!(t.rows().iter().any(|r| r.path == canon.join("a.md")));
-        assert!(t.rows().iter().any(|r| r.path == canon.join("b-dir/inner.md")));
+        assert!(t
+            .rows()
+            .iter()
+            .any(|r| r.path == canon.join("b-dir/inner.md")));
         // and the tree is rooted one level up now
         assert_eq!(t.root(), canon.parent().unwrap());
     }

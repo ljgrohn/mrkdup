@@ -56,7 +56,9 @@ impl Editor {
     }
 
     pub fn save(&mut self, force: bool) -> io::Result<SaveOutcome> {
-        let Some(path) = self.path.clone() else { return Ok(SaveOutcome::NoFile) };
+        let Some(path) = self.path.clone() else {
+            return Ok(SaveOutcome::NoFile);
+        };
         if !self.dirty {
             return Ok(SaveOutcome::Clean);
         }
@@ -72,7 +74,9 @@ impl Editor {
     /// Clean buffer + changed disk => reload; returns true if reloaded.
     /// A dirty buffer is never reloaded (save() reports the conflict).
     pub fn check_external(&mut self) -> io::Result<bool> {
-        let Some(path) = self.path.clone() else { return Ok(false) };
+        let Some(path) = self.path.clone() else {
+            return Ok(false);
+        };
         if !self.disk_changed(&path) || self.dirty {
             return Ok(false);
         }
