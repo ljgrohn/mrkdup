@@ -9,6 +9,7 @@ use crate::editor::{Editor, SaveOutcome};
 use crate::tree::Tree;
 
 const IDLE_AUTOSAVE: Duration = Duration::from_secs(2);
+const TREE_REFRESH: Duration = Duration::from_secs(2);
 
 pub enum Focus {
     Tree,
@@ -40,6 +41,7 @@ pub struct App {
     pub tree_scroll: usize,
     pub should_quit: bool,
     pub last_edit: Option<Instant>,
+    pub last_tree_refresh: Instant,
     pending_quit: bool,
     force_next_save: bool,
     last_search: String,
@@ -57,6 +59,7 @@ impl App {
             tree_scroll: 0,
             should_quit: false,
             last_edit: None,
+            last_tree_refresh: Instant::now(),
             pending_quit: false,
             force_next_save: false,
             last_search: String::new(),
@@ -104,6 +107,12 @@ impl App {
             Ok(false) => {}
             Err(e) => self.status = Some(format!("reload failed: {e}")),
         }
+        // pick up files created/removed outside the app; the rebuild
+        // only walks expanded directories, so this stays cheap
+        if self.last_tree_refresh.elapsed() >= TREE_REFRESH {
+            self.tree.refresh();
+            self.last_tree_refresh = Instant::now();
+        }
     }
 
     fn tree_key(&mut self, key: KeyEvent) {
@@ -120,6 +129,11 @@ impl App {
             KeyCode::Char('n') => self.prompt = Prompt::NewFile(String::new()),
             KeyCode::Char('X') => self.confirm_delete(),
             KeyCode::Char('m') => self.start_move(),
+            KeyCode::Char('r') => {
+                self.tree.refresh();
+                self.last_tree_refresh = Instant::now();
+                self.status = Some("refreshed".into());
+            }
             KeyCode::Enter | KeyCode::Tab => self.open_selected(),
             _ => {}
         }
@@ -802,6 +816,26 @@ mod tests {
         app.handle_key(key(KeyCode::Enter)); // first dest is root = current dir
         assert!(root.join("a.md").exists());
         assert!(app.status.is_some());
+    }
+
+    #[test]
+    fn r_refreshes_tree_to_pick_up_external_files() {
+        let root = fixture("refresh-key");
+        let mut app = App::new(root.clone()).unwrap();
+        fs::write(root.join("new.md"), "n\n").unwrap();
+        assert!(!app.tree.rows().iter().any(|r| r.name == "new.md"));
+        app.handle_key(key(KeyCode::Char('r')));
+        assert!(app.tree.rows().iter().any(|r| r.name == "new.md"));
+    }
+
+    #[test]
+    fn tick_auto_refreshes_tree_periodically() {
+        let root = fixture("refresh-tick");
+        let mut app = App::new(root.clone()).unwrap();
+        fs::write(root.join("new.md"), "n\n").unwrap();
+        app.last_tree_refresh = std::time::Instant::now() - std::time::Duration::from_secs(3);
+        app.tick();
+        assert!(app.tree.rows().iter().any(|r| r.name == "new.md"));
     }
 
     #[test]

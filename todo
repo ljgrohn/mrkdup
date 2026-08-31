@@ -6,6 +6,13 @@
 
 - [x] when pressing n for a new file, I don't like that it is down at the bottom. Instead, make a pop up with the naming prompt @done(2026-08-31 16:29)
 
-- [ ] need a reload button where it scans the file folders for changes. Should we be polling on a regular basis? I don't want to add background processes if that isn't a good idea, but if it's not out of the norm and won't cause any issues I am down. Give me your best thoughts on it
+- [x] need a reload button where it scans the file folders for changes. Should we be polling on a regular basis? I don't want to add background processes if that isn't a good idea, but if it's not out of the norm and won't cause any issues I am down. Give me your best thoughts on it @done(2026-08-31 16:33)
+  Shipped both: `r` refreshes manually, and the tree auto-refreshes every ~2s.
+  No background process was added — the app already wakes every 250ms when
+  idle (that's how autosave and open-file reload work), so the tree refresh
+  rides that same tick. It only re-walks *expanded* directories, so it's
+  cheap. This is the norm for TUIs. The fancier route is the `notify` crate
+  (macOS FSEvents) for instant updates — it does add a watcher thread and a
+  dependency; worth it only if 2s ever feels slow.
 
 
