@@ -1,3 +1,4 @@
+use ratatui::style::{Color, Style};
 use ratatui_textarea::{TextArea, WrapMode};
 use std::fs;
 use std::io;
@@ -23,6 +24,7 @@ pub struct Editor {
 fn make_textarea(lines: Vec<String>) -> TextArea<'static> {
     let mut ta = TextArea::from(lines);
     ta.set_wrap_mode(WrapMode::WordOrGlyph);
+    ta.set_search_style(Style::default().bg(Color::Yellow).fg(Color::Black));
     ta
 }
 

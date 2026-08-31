@@ -257,6 +257,9 @@ impl App {
         }
         match self.editor.open(&path) {
             Ok(()) => {
+                // open() rebuilds the textarea, but be explicit: no stale
+                // search highlight carries into the newly opened file
+                let _ = self.editor.textarea.set_search_pattern("");
                 self.focus = Focus::Editor;
                 self.editor_visible = true;
                 self.force_next_save = false;
@@ -275,6 +278,14 @@ impl App {
             (true, KeyCode::Char('s')) => self.do_save(),
             (true, KeyCode::Char('f')) => self.prompt = Prompt::Search(String::new()),
             (true, KeyCode::Char('d')) => self.toggle_checkbox(),
+            (true, KeyCode::Char('g')) => {
+                if self.last_search.is_empty() {
+                    self.status = Some("no previous search (Ctrl+F to search)".into());
+                } else {
+                    let q = self.last_search.clone();
+                    self.search_next(&q);
+                }
+            }
             // crate defaults are Ctrl+U/Ctrl+R with Ctrl+Y = paste;
             // intercept so the advertised keys work
             (true, KeyCode::Char('z')) => {
@@ -517,6 +528,8 @@ impl App {
         if query.is_empty() {
             return;
         }
+        // highlight every match of the (escaped, so literal) query
+        let _ = self.editor.textarea.set_search_pattern(regex_escape(query));
         let DataCursor(crow, ccol) = self.editor.textarea.cursor();
         let lines: Vec<String> = self.editor.textarea.lines().to_vec();
         let n = lines.len();
@@ -541,6 +554,37 @@ impl App {
         self.status = Some(format!("not found: {query}"));
         self.last_search = query.to_string();
     }
+}
+
+/// Escape `s` so it matches literally when used as a regex pattern.
+fn regex_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(
+            c,
+            '\\' | '.'
+                | '+'
+                | '*'
+                | '?'
+                | '('
+                | ')'
+                | '|'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '^'
+                | '$'
+                | '#'
+                | '&'
+                | '-'
+                | '~'
+        ) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// The checkbox-toggled form of `line`, indentation preserved.
@@ -714,6 +758,80 @@ mod tests {
         app.handle_key(ctrl('f'));
         app.handle_key(key(KeyCode::Enter)); // empty -> repeat "l"
         assert_eq!(app.editor.textarea.cursor(), (0, 3));
+    }
+
+    #[test]
+    fn ctrl_g_jumps_to_the_next_match_of_the_last_search() {
+        let mut app = App::new(fixture("next")).unwrap();
+        app.handle_key(key(KeyCode::Enter)); // hello / world
+        app.handle_key(ctrl('f'));
+        app.handle_key(key(KeyCode::Char('l')));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.editor.textarea.cursor(), (0, 2));
+        app.handle_key(ctrl('g'));
+        assert_eq!(app.editor.textarea.cursor(), (0, 3));
+        app.handle_key(ctrl('g'));
+        assert_eq!(app.editor.textarea.cursor(), (1, 3)); // "world"
+    }
+
+    #[test]
+    fn ctrl_g_without_a_previous_search_shows_a_status_message() {
+        let mut app = App::new(fixture("next-none")).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(ctrl('g'));
+        assert_eq!(app.editor.textarea.cursor(), (0, 0)); // didn't move
+        assert!(app.status.as_deref().is_some_and(|s| s.contains("search")));
+    }
+
+    #[test]
+    fn search_submit_sets_a_highlight_pattern() {
+        let mut app = App::new(fixture("hl")).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(ctrl('f'));
+        for c in "wor".chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+        app.handle_key(key(KeyCode::Enter));
+        assert!(app.editor.textarea.search_pattern().is_some());
+    }
+
+    #[test]
+    fn opening_a_file_clears_the_highlight_pattern() {
+        let mut app = App::new(fixture("hl-clear")).unwrap();
+        app.handle_key(key(KeyCode::Enter)); // a.md
+        app.handle_key(ctrl('f'));
+        app.handle_key(key(KeyCode::Char('l')));
+        app.handle_key(key(KeyCode::Enter));
+        assert!(app.editor.textarea.search_pattern().is_some());
+        app.handle_key(key(KeyCode::Esc));
+        app.handle_key(key(KeyCode::Char('j'))); // b.md
+        app.handle_key(key(KeyCode::Enter));
+        assert!(app.editor.textarea.search_pattern().is_none());
+    }
+
+    #[test]
+    fn search_query_with_regex_metachars_matches_literally() {
+        let root = fixture("meta");
+        fs::write(root.join("a.md"), "price (a.b) here\n").unwrap();
+        let mut app = App::new(root).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(ctrl('f'));
+        for c in "(a.b)".chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.editor.textarea.cursor(), (0, 6));
+        // "axb" must not match the escaped pattern
+        let pat = app.editor.textarea.search_pattern().unwrap();
+        assert!(!pat.is_match("axb"));
+        assert!(pat.is_match("(a.b)"));
+    }
+
+    #[test]
+    fn regex_escape_neutralizes_metacharacters() {
+        assert_eq!(regex_escape("a.b*"), r"a\.b\*");
+        assert_eq!(regex_escape(r"[x]+(\d)"), r"\[x\]\+\(\\d\)");
+        assert_eq!(regex_escape("plain"), "plain");
     }
 
     #[test]
