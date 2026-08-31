@@ -1,1 +1,11 @@
-This is a test 
+- [ ] Live markdown styling in the editor (the big one)
+  Obsidian-style inline rendering while editing raw text: bold/colored
+  headings, styled `- [ ]` checkboxes, dimmed syntax marks (`**`, `#`),
+  styled blockquotes and code fences. Means taking over line rendering
+  from ratatui-textarea, so it needs a design conversation before code:
+  scope which elements, and whether marks hide on non-cursor lines.
+
+- [ ] Ship it properly: crates.io + releases
+  Publish `mrkdup` to crates.io (grabs the name), tag v0.1.0, add a CI
+  badge to the README, and set up cargo-dist (or a release workflow) so
+  tagged releases ship prebuilt binaries for mac/linux/windows.
