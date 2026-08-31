@@ -19,11 +19,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let [main, status] =
         Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(f.area());
 
-    if app.tree_visible {
+    if app.tree_visible && app.editor_visible {
         let [tree_area, editor_area] =
             Layout::horizontal([Constraint::Length(30), Constraint::Min(1)]).areas(main);
         draw_tree(f, app, tree_area);
         draw_editor(f, app, editor_area);
+    } else if app.tree_visible {
+        draw_tree(f, app, main);
     } else {
         draw_editor(f, app, main);
     }
@@ -161,6 +163,7 @@ fn draw_tree(f: &mut Frame, app: &mut App, area: Rect) {
         app.tree_scroll = selected + 1 - height;
     }
 
+    let open_marker = open_marker_index(app.tree.rows(), app.editor.path.as_deref());
     let lines: Vec<Line> = app
         .tree
         .rows()
@@ -180,12 +183,9 @@ fn draw_tree(f: &mut Frame, app: &mut App, area: Rect) {
             };
             let text = format!("{}{}{}", "  ".repeat(row.depth), marker, row.name);
             let mut line = Line::from(text);
-            // the document shown in the editor pane stays marked
-            let is_open = app.editor.path.as_deref() == Some(row.path.as_path());
-            let mut style = if is_open {
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
+            // blue = the open document (or the folder hiding it)
+            let mut style = if Some(i) == open_marker {
+                Style::default().bg(Color::Blue).fg(Color::White)
             } else {
                 Style::default()
             };
@@ -200,6 +200,21 @@ fn draw_tree(f: &mut Frame, app: &mut App, area: Rect) {
         })
         .collect();
     f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Which tree row carries the blue "open document" marker: the open
+/// file's own row, or — when a collapsed folder hides it — the deepest
+/// visible ancestor directory.
+fn open_marker_index(rows: &[crate::tree::Row], open: Option<&std::path::Path>) -> Option<usize> {
+    let open = open?;
+    if let Some(i) = rows.iter().position(|r| r.path == open) {
+        return Some(i);
+    }
+    rows.iter()
+        .enumerate()
+        .filter(|(_, r)| r.is_dir && open.starts_with(&r.path))
+        .max_by_key(|(_, r)| r.path.components().count())
+        .map(|(i, _)| i)
 }
 
 fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
@@ -331,6 +346,32 @@ mod tests {
         let text = format!("{:?}", terminal.backend().buffer());
         assert!(text.contains("New file")); // popup title
         assert!(text.contains("z")); // typed input shown in the popup
+    }
+
+    #[test]
+    fn open_marker_falls_back_to_collapsed_ancestor() {
+        use crate::tree::Row;
+        use std::path::PathBuf;
+        let row = |path: &str, is_dir: bool| Row {
+            path: PathBuf::from(path),
+            name: String::new(),
+            depth: 0,
+            is_dir,
+            expanded: false,
+        };
+        let open = PathBuf::from("/r/docs/sub/a.md");
+        // file visible -> its own row wins
+        let rows = vec![row("/r/docs", true), row("/r/docs/sub/a.md", false)];
+        assert_eq!(open_marker_index(&rows, Some(&open)), Some(1));
+        // file hidden -> deepest visible ancestor dir
+        let rows = vec![
+            row("/r/docs", true),
+            row("/r/docs/sub", true),
+            row("/r/other", true),
+        ];
+        assert_eq!(open_marker_index(&rows, Some(&open)), Some(1));
+        // nothing open -> no marker
+        assert_eq!(open_marker_index(&rows, None), None);
     }
 
     #[test]

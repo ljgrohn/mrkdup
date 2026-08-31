@@ -36,6 +36,7 @@ pub struct App {
     pub editor: Editor,
     pub focus: Focus,
     pub tree_visible: bool,
+    pub editor_visible: bool,
     pub prompt: Prompt,
     pub status: Option<String>,
     pub tree_scroll: usize,
@@ -54,6 +55,7 @@ impl App {
             editor: Editor::new(),
             focus: Focus::Tree,
             tree_visible: true,
+            editor_visible: true,
             prompt: Prompt::None,
             status: None,
             tree_scroll: 0,
@@ -78,7 +80,15 @@ impl App {
             (true, KeyCode::Char('b')) => {
                 self.tree_visible = !self.tree_visible;
                 if !self.tree_visible {
+                    self.editor_visible = true; // never hide both panes
                     self.focus = Focus::Editor;
+                }
+            }
+            (true, KeyCode::Char('e')) => {
+                self.editor_visible = !self.editor_visible;
+                if !self.editor_visible {
+                    self.tree_visible = true; // never hide both panes
+                    self.focus = Focus::Tree;
                 }
             }
             _ => match self.focus {
@@ -247,6 +257,7 @@ impl App {
         match self.editor.open(&path) {
             Ok(()) => {
                 self.focus = Focus::Editor;
+                self.editor_visible = true;
                 self.force_next_save = false;
                 self.pending_quit = false;
                 self.last_edit = None;
@@ -557,6 +568,30 @@ mod tests {
         assert!(matches!(app.focus, Focus::Editor));
         app.handle_key(ctrl('b'));
         assert!(app.tree_visible);
+    }
+
+    #[test]
+    fn ctrl_e_hides_editor_and_opening_a_file_reshows_it() {
+        let mut app = App::new(fixture("epane")).unwrap();
+        app.handle_key(ctrl('e'));
+        assert!(!app.editor_visible);
+        assert!(app.tree_visible);
+        assert!(matches!(app.focus, Focus::Tree));
+        app.handle_key(key(KeyCode::Enter)); // open a.md
+        assert!(app.editor_visible);
+        assert!(matches!(app.focus, Focus::Editor));
+    }
+
+    #[test]
+    fn panes_can_never_both_be_hidden() {
+        let mut app = App::new(fixture("panes")).unwrap();
+        app.handle_key(ctrl('e')); // editor hidden
+        app.handle_key(ctrl('b')); // hide tree -> editor must come back
+        assert!(app.editor_visible);
+        assert!(!app.tree_visible);
+        app.handle_key(ctrl('e')); // hide editor -> tree must come back
+        assert!(app.tree_visible);
+        assert!(!app.editor_visible);
     }
 
     #[test]
