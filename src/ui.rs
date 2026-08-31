@@ -1,7 +1,7 @@
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 use ratatui_textarea::DataCursor;
 
@@ -29,6 +29,50 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
 
     draw_status(f, app, status);
+    draw_popup(f, app, main);
+}
+
+/// A `width` x `height` rect centered in `area` (clamped to fit).
+fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let w = width.min(area.width);
+    let h = height.min(area.height);
+    Rect {
+        x: area.x + (area.width - w) / 2,
+        y: area.y + (area.height - h) / 2,
+        width: w,
+        height: h,
+    }
+}
+
+fn popup_block(title: &str) -> Block<'_> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(title)
+}
+
+fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
+    if let Prompt::ConfirmDelete { path, yes } = &app.prompt {
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        let popup = centered_rect((name.len() as u16 + 16).max(30), 5, area);
+        f.render_widget(Clear, popup);
+        let block = popup_block(" Delete file? ");
+        let inner = block.inner(popup);
+        f.render_widget(block, popup);
+        let on = Style::default().add_modifier(Modifier::REVERSED);
+        let off = Style::default();
+        let lines = vec![
+            Line::from(format!("Delete {name}?")).alignment(Alignment::Center),
+            Line::from(""),
+            Line::from(vec![
+                ratatui::text::Span::styled("  Yes  ", if *yes { on } else { off }),
+                ratatui::text::Span::raw("   "),
+                ratatui::text::Span::styled("  No  ", if *yes { off } else { on }),
+            ])
+            .alignment(Alignment::Center),
+        ];
+        f.render_widget(Paragraph::new(lines), inner);
+    }
 }
 
 fn draw_tree(f: &mut Frame, app: &mut App, area: Rect) {
@@ -122,6 +166,9 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     let text = match &app.prompt {
         Prompt::NewFile(s) => format!("{mode}| new file: {s}"),
         Prompt::Search(s) => format!("{mode}| search: {s}"),
+        Prompt::ConfirmDelete { .. } => {
+            format!("{mode}| j/k choose · Enter confirm · Esc cancel")
+        }
         Prompt::None => {
             let path = app
                 .editor

@@ -19,6 +19,7 @@ pub enum Prompt {
     None,
     NewFile(String),
     Search(String),
+    ConfirmDelete { path: PathBuf, yes: bool },
 }
 
 pub struct App {
@@ -109,9 +110,37 @@ impl App {
             KeyCode::Char('-') => self.tree.ascend(),
             KeyCode::Char('+') => self.tree.make_root(),
             KeyCode::Char('n') => self.prompt = Prompt::NewFile(String::new()),
+            KeyCode::Char('X') => self.confirm_delete(),
             KeyCode::Enter | KeyCode::Tab => self.open_selected(),
             _ => {}
         }
+    }
+
+    fn confirm_delete(&mut self) {
+        match self.tree.selected_row() {
+            Some(r) if !r.is_dir => {
+                self.prompt = Prompt::ConfirmDelete {
+                    path: r.path.clone(),
+                    yes: false,
+                };
+            }
+            Some(_) => self.status = Some("can only delete files".into()),
+            None => {}
+        }
+    }
+
+    fn delete_file(&mut self, path: PathBuf) {
+        if let Err(e) = std::fs::remove_file(&path) {
+            self.status = Some(format!("delete failed: {e}"));
+            return;
+        }
+        if self.editor.path.as_deref() == Some(path.as_path()) {
+            self.editor = Editor::new();
+            self.last_edit = None;
+        }
+        self.tree.refresh();
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        self.status = Some(format!("deleted {name}"));
     }
 
     fn open_selected(&mut self) {
@@ -253,34 +282,51 @@ impl App {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             return;
         }
-        match key.code {
-            KeyCode::Esc => self.prompt = Prompt::None,
-            KeyCode::Backspace => {
-                if let Prompt::NewFile(s) | Prompt::Search(s) = &mut self.prompt {
+        if key.code == KeyCode::Esc {
+            self.prompt = Prompt::None;
+            return;
+        }
+        match &mut self.prompt {
+            Prompt::NewFile(s) | Prompt::Search(s) => match key.code {
+                KeyCode::Backspace => {
                     s.pop();
                 }
-            }
-            KeyCode::Char(c) => {
-                if let Prompt::NewFile(s) | Prompt::Search(s) = &mut self.prompt {
-                    s.push(c);
-                }
-            }
-            KeyCode::Enter => {
-                match std::mem::replace(&mut self.prompt, Prompt::None) {
-                    Prompt::NewFile(name) => self.submit_new_file(&name),
-                    Prompt::Search(query) => {
-                        // empty submit repeats the previous search
-                        let q = if query.is_empty() {
-                            self.last_search.clone()
-                        } else {
-                            query
-                        };
-                        self.search_next(&q);
+                KeyCode::Char(c) => s.push(c),
+                KeyCode::Enter => {
+                    match std::mem::replace(&mut self.prompt, Prompt::None) {
+                        Prompt::NewFile(name) => self.submit_new_file(&name),
+                        Prompt::Search(query) => {
+                            // empty submit repeats the previous search
+                            let q = if query.is_empty() {
+                                self.last_search.clone()
+                            } else {
+                                query
+                            };
+                            self.search_next(&q);
+                        }
+                        _ => {}
                     }
-                    Prompt::None => {}
                 }
-            }
-            _ => {}
+                _ => {}
+            },
+            Prompt::ConfirmDelete { path, yes } => match key.code {
+                KeyCode::Char('j' | 'k') | KeyCode::Down | KeyCode::Up => *yes = !*yes,
+                // Shift+X again = confirm the delete
+                KeyCode::Char('X') => {
+                    let p = path.clone();
+                    self.prompt = Prompt::None;
+                    self.delete_file(p);
+                }
+                KeyCode::Enter => {
+                    let (p, yes) = (path.clone(), *yes);
+                    self.prompt = Prompt::None;
+                    if yes {
+                        self.delete_file(p);
+                    }
+                }
+                _ => {}
+            },
+            Prompt::None => {}
         }
     }
 
@@ -548,6 +594,76 @@ mod tests {
         // docs/ sorts first (dirs before files), so it's already selected
         app.handle_key(KeyEvent::new(KeyCode::Char('+'), KeyModifiers::SHIFT));
         assert_eq!(app.tree.root(), root.canonicalize().unwrap().join("docs"));
+    }
+
+    #[test]
+    fn shift_x_confirm_no_by_default_keeps_file() {
+        let root = fixture("del-no");
+        let mut app = App::new(root.clone()).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
+        assert!(matches!(
+            app.prompt,
+            Prompt::ConfirmDelete { yes: false, .. }
+        ));
+        app.handle_key(key(KeyCode::Enter)); // No selected -> just closes
+        assert!(matches!(app.prompt, Prompt::None));
+        assert!(root.join("a.md").exists());
+    }
+
+    #[test]
+    fn shift_x_then_yes_deletes_file() {
+        let root = fixture("del-yes");
+        let mut app = App::new(root.clone()).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
+        app.handle_key(key(KeyCode::Char('j'))); // move highlight to Yes
+        app.handle_key(key(KeyCode::Enter));
+        assert!(!root.join("a.md").exists());
+        assert!(!app.tree.rows().iter().any(|r| r.name == "a.md"));
+    }
+
+    #[test]
+    fn shift_x_inside_popup_deletes_immediately() {
+        let root = fixture("del-xx");
+        let mut app = App::new(root.clone()).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
+        app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
+        assert!(!root.join("a.md").exists());
+    }
+
+    #[test]
+    fn esc_closes_delete_popup_without_deleting() {
+        let root = fixture("del-esc");
+        let mut app = App::new(root.clone()).unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
+        app.handle_key(key(KeyCode::Esc));
+        assert!(matches!(app.prompt, Prompt::None));
+        assert!(root.join("a.md").exists());
+    }
+
+    #[test]
+    fn deleting_the_open_file_clears_the_editor() {
+        let root = fixture("del-open");
+        let mut app = App::new(root.clone()).unwrap();
+        app.handle_key(key(KeyCode::Enter)); // open a.md
+        app.handle_key(key(KeyCode::Esc));
+        app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
+        app.handle_key(key(KeyCode::Char('k'))); // k also toggles to Yes
+        app.handle_key(key(KeyCode::Enter));
+        assert!(app.editor.path.is_none());
+        assert_eq!(app.editor.textarea.lines(), [""]);
+    }
+
+    #[test]
+    fn shift_x_on_directory_is_refused() {
+        let root = fixture("del-dir");
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::write(root.join("docs/x.md"), "x\n").unwrap();
+        let mut app = App::new(root.clone()).unwrap();
+        // docs/ sorts first, so it's selected
+        app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
+        assert!(matches!(app.prompt, Prompt::None));
+        assert!(app.status.is_some());
+        assert!(root.join("docs").exists());
     }
 
     #[test]
