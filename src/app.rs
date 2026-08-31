@@ -33,6 +33,14 @@ pub enum Prompt {
         path: PathBuf,
         input: String,
     },
+    GoToFile {
+        input: String,
+        /// (root-relative display path, absolute path), collected once
+        /// when the popup opens.
+        candidates: Vec<(String, PathBuf)>,
+        /// Index into the current filtered result list.
+        selected: usize,
+    },
 }
 
 pub struct App {
@@ -88,6 +96,7 @@ impl App {
                     self.focus = Focus::Editor;
                 }
             }
+            (true, KeyCode::Char('p')) => self.open_go_to_file(),
             // Ctrl+T, not Ctrl+E: macOS terminals send Ctrl+E for Cmd+Right
             (true, KeyCode::Char('t')) => {
                 self.editor_visible = !self.editor_visible;
@@ -251,6 +260,15 @@ impl App {
         self.tree.refresh();
         self.tree.select_path(&target);
         self.status = Some(format!("renamed to {name}"));
+    }
+
+    fn open_go_to_file(&mut self) {
+        let candidates = collect_candidates(self.tree.root(), self.tree.show_hidden());
+        self.prompt = Prompt::GoToFile {
+            input: String::new(),
+            candidates,
+            selected: 0,
+        };
     }
 
     fn confirm_delete(&mut self) {
@@ -477,6 +495,20 @@ impl App {
 
     fn prompt_key(&mut self, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
+            // Ctrl+J/Ctrl+K move the go-to-file selection
+            if let Prompt::GoToFile {
+                input,
+                candidates,
+                selected,
+            } = &mut self.prompt
+            {
+                let n = fuzzy_filter(input, candidates).len();
+                match key.code {
+                    KeyCode::Char('j') => *selected = (*selected + 1).min(n.saturating_sub(1)),
+                    KeyCode::Char('k') => *selected = selected.saturating_sub(1),
+                    _ => {}
+                }
+            }
             return;
         }
         if key.code == KeyCode::Esc {
@@ -533,6 +565,35 @@ impl App {
                         std::mem::replace(&mut self.prompt, Prompt::None)
                     {
                         self.submit_rename(&path, input.trim());
+                    }
+                }
+                _ => {}
+            },
+            Prompt::GoToFile {
+                input,
+                candidates,
+                selected,
+            } => match key.code {
+                KeyCode::Backspace => {
+                    input.pop();
+                    *selected = 0;
+                }
+                KeyCode::Char(c) => {
+                    input.push(c);
+                    *selected = 0;
+                }
+                KeyCode::Down => {
+                    let n = fuzzy_filter(input, candidates).len();
+                    *selected = (*selected + 1).min(n.saturating_sub(1));
+                }
+                KeyCode::Up => *selected = selected.saturating_sub(1),
+                KeyCode::Enter => {
+                    let target = fuzzy_filter(input, candidates)
+                        .get(*selected)
+                        .map(|c| c.1.clone());
+                    self.prompt = Prompt::None;
+                    if let Some(path) = target {
+                        self.open_file(path);
                     }
                 }
                 _ => {}
@@ -620,6 +681,86 @@ impl App {
         self.status = Some(format!("not found: {query}"));
         self.last_search = query.to_string();
     }
+}
+
+/// All text files under `root` as (root-relative display path, absolute
+/// path), sorted by relative path, capped at 5000. Respects .gitignore,
+/// skips .git, and includes dotfiles only when `show_hidden` is set.
+fn collect_candidates(root: &std::path::Path, show_hidden: bool) -> Vec<(String, PathBuf)> {
+    const CAP: usize = 5000;
+    let mut out = Vec::new();
+    let walker = ignore::WalkBuilder::new(root)
+        .hidden(!show_hidden)
+        .require_git(false)
+        .git_global(false)
+        .parents(false)
+        .filter_entry(|e| e.file_name() != ".git")
+        .build();
+    for entry in walker.flatten() {
+        if out.len() >= CAP {
+            break;
+        }
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
+            continue;
+        }
+        let path = entry.into_path();
+        if !crate::fsutil::is_text_file(&path) {
+            continue;
+        }
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .into_owned();
+        out.push((rel, path));
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// Case-insensitive subsequence match of `query` in `candidate` (greedy,
+/// leftmost). `None` = no match; otherwise a sort key where smaller ranks
+/// first: (query chars outside the longest consecutive matched run,
+/// first match position, candidate length). An empty query matches
+/// everything.
+fn fuzzy_score(query: &str, candidate: &str) -> Option<(usize, usize, usize)> {
+    let q: Vec<char> = query.to_lowercase().chars().collect();
+    let c: Vec<char> = candidate.to_lowercase().chars().collect();
+    if q.is_empty() {
+        return Some((0, 0, c.len()));
+    }
+    let mut positions = Vec::with_capacity(q.len());
+    let mut from = 0;
+    for &qc in &q {
+        let found = from + c[from..].iter().position(|&cc| cc == qc)?;
+        positions.push(found);
+        from = found + 1;
+    }
+    let mut max_run = 1usize;
+    let mut run = 1usize;
+    for w in positions.windows(2) {
+        if w[1] == w[0] + 1 {
+            run += 1;
+            max_run = max_run.max(run);
+        } else {
+            run = 1;
+        }
+    }
+    Some((q.len() - max_run, positions[0], c.len()))
+}
+
+/// The candidates matching `query`, best first (stable: ties keep the
+/// input order).
+pub(crate) fn fuzzy_filter<'a>(
+    query: &str,
+    candidates: &'a [(String, PathBuf)],
+) -> Vec<&'a (String, PathBuf)> {
+    let mut scored: Vec<_> = candidates
+        .iter()
+        .filter_map(|c| fuzzy_score(query, &c.0).map(|s| (s, c)))
+        .collect();
+    scored.sort_by_key(|(s, _)| *s);
+    scored.into_iter().map(|(_, c)| c).collect()
 }
 
 /// Escape `s` so it matches literally when used as a regex pattern.
@@ -1322,6 +1463,171 @@ mod tests {
         app.handle_key(key(KeyCode::Esc));
         assert!(matches!(app.prompt, Prompt::None));
         assert!(root.join("a.md").exists());
+    }
+
+    #[test]
+    fn fuzzy_score_matches_subsequences_and_rejects_non_matches() {
+        assert!(fuzzy_score("anm", "app/notes.md").is_some());
+        assert!(fuzzy_score("zzz", "app/notes.md").is_none());
+        // subsequence order matters
+        assert!(fuzzy_score("mn", "notes.md").is_none());
+        // empty query matches everything
+        assert!(fuzzy_score("", "notes.md").is_some());
+    }
+
+    #[test]
+    fn fuzzy_score_is_case_insensitive() {
+        assert!(fuzzy_score("RM", "readme.md").is_some());
+        assert_eq!(
+            fuzzy_score("RM", "readme.md"),
+            fuzzy_score("rm", "README.md")
+        );
+    }
+
+    #[test]
+    fn fuzzy_score_ranks_consecutive_runs_first() {
+        let tight = fuzzy_score("abc", "abc.md").unwrap();
+        let scattered = fuzzy_score("abc", "a1b2c.md").unwrap();
+        assert!(tight < scattered);
+    }
+
+    #[test]
+    fn fuzzy_score_prefers_earlier_matches_when_runs_tie() {
+        let early = fuzzy_score("ab", "ab_xxx.md").unwrap();
+        let late = fuzzy_score("ab", "xxx_ab.md").unwrap();
+        assert!(early < late);
+    }
+
+    #[test]
+    fn fuzzy_score_breaks_remaining_ties_by_shorter_path() {
+        let short = fuzzy_score("ab", "ab.md").unwrap();
+        let long = fuzzy_score("ab", "ab-longer.md").unwrap();
+        assert!(short < long);
+    }
+
+    #[test]
+    fn ctrl_p_opens_go_to_file_with_text_files_from_the_whole_root() {
+        let root = fixture("gtf-open");
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::write(root.join("docs/deep.md"), "d\n").unwrap();
+        fs::write(root.join("bin.dat"), b"\x00\x01").unwrap();
+        let mut app = App::new(root).unwrap();
+        app.handle_key(ctrl('p'));
+        match &app.prompt {
+            Prompt::GoToFile { candidates, .. } => {
+                let rels: Vec<&str> = candidates.iter().map(|c| c.0.as_str()).collect();
+                assert!(rels.contains(&"a.md"));
+                assert!(rels.contains(&"docs/deep.md")); // walks subdirs, root-relative
+                assert!(!rels.iter().any(|r| r.contains("bin.dat"))); // text files only
+            }
+            _ => panic!("expected go-to-file prompt"),
+        }
+    }
+
+    #[test]
+    fn ctrl_p_typing_filters_and_enter_opens_the_top_match() {
+        let root = fixture("gtf-enter");
+        let mut app = App::new(root.clone()).unwrap();
+        app.handle_key(ctrl('p'));
+        app.handle_key(key(KeyCode::Char('b')));
+        app.handle_key(key(KeyCode::Enter));
+        assert!(matches!(app.prompt, Prompt::None));
+        assert!(matches!(app.focus, Focus::Editor));
+        assert_eq!(
+            app.editor.path.as_deref(),
+            Some(root.canonicalize().unwrap().join("b.md").as_path())
+        );
+    }
+
+    #[test]
+    fn ctrl_p_selection_moves_with_arrows_and_ctrl_jk() {
+        let mut app = App::new(fixture("gtf-move")).unwrap();
+        app.handle_key(ctrl('p')); // empty query: a.md, b.md in order
+        app.handle_key(key(KeyCode::Down));
+        match &app.prompt {
+            Prompt::GoToFile { selected, .. } => assert_eq!(*selected, 1),
+            _ => panic!("expected go-to-file prompt"),
+        }
+        app.handle_key(ctrl('k'));
+        match &app.prompt {
+            Prompt::GoToFile { selected, .. } => assert_eq!(*selected, 0),
+            _ => panic!("expected go-to-file prompt"),
+        }
+        app.handle_key(ctrl('j'));
+        app.handle_key(key(KeyCode::Enter)); // second result = b.md
+        assert!(app
+            .editor
+            .path
+            .as_deref()
+            .is_some_and(|p| p.ends_with("b.md")));
+    }
+
+    #[test]
+    fn ctrl_p_from_the_editor_autosaves_before_opening() {
+        let root = fixture("gtf-autosave");
+        let mut app = App::new(root.clone()).unwrap();
+        app.handle_key(key(KeyCode::Enter)); // open a.md
+        app.handle_key(key(KeyCode::Char('X')));
+        app.handle_key(ctrl('p')); // global: works from editor focus too
+        app.handle_key(key(KeyCode::Char('b')));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(
+            fs::read_to_string(root.join("a.md")).unwrap(),
+            "Xhello\nworld\n"
+        );
+        assert_eq!(app.editor.textarea.lines(), ["bee"]);
+    }
+
+    #[test]
+    fn ctrl_p_honors_the_tree_hidden_setting() {
+        let root = fixture("gtf-hidden");
+        fs::write(root.join(".secret.md"), "s\n").unwrap();
+        let mut app = App::new(root).unwrap();
+        app.handle_key(ctrl('p'));
+        match &app.prompt {
+            Prompt::GoToFile { candidates, .. } => {
+                assert!(!candidates.iter().any(|c| c.0.contains(".secret.md")));
+            }
+            _ => panic!("expected go-to-file prompt"),
+        }
+        app.handle_key(key(KeyCode::Esc));
+        app.handle_key(key(KeyCode::Char('.'))); // tree: show hidden
+        app.handle_key(ctrl('p'));
+        match &app.prompt {
+            Prompt::GoToFile { candidates, .. } => {
+                assert!(candidates.iter().any(|c| c.0.contains(".secret.md")));
+            }
+            _ => panic!("expected go-to-file prompt"),
+        }
+    }
+
+    #[test]
+    fn esc_closes_go_to_file_without_opening() {
+        let mut app = App::new(fixture("gtf-esc")).unwrap();
+        app.handle_key(ctrl('p'));
+        app.handle_key(key(KeyCode::Esc));
+        assert!(matches!(app.prompt, Prompt::None));
+        assert!(app.editor.path.is_none());
+    }
+
+    #[test]
+    fn ctrl_p_does_not_fire_inside_another_prompt() {
+        let mut app = App::new(fixture("gtf-nested")).unwrap();
+        app.handle_key(key(KeyCode::Char('n'))); // NewFile prompt
+        app.handle_key(ctrl('p'));
+        assert!(matches!(app.prompt, Prompt::NewFile(_)));
+    }
+
+    #[test]
+    fn enter_with_no_go_to_file_match_just_closes() {
+        let mut app = App::new(fixture("gtf-nomatch")).unwrap();
+        app.handle_key(ctrl('p'));
+        for c in "qqq".chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+        app.handle_key(key(KeyCode::Enter));
+        assert!(matches!(app.prompt, Prompt::None));
+        assert!(app.editor.path.is_none());
     }
 
     #[test]

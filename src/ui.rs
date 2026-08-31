@@ -78,6 +78,45 @@ fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
     if let Prompt::Rename { input, .. } = &app.prompt {
         draw_input_popup(f, area, " Rename ", input);
     }
+    if let Prompt::GoToFile {
+        input,
+        candidates,
+        selected,
+    } = &app.prompt
+    {
+        let matches = crate::app::fuzzy_filter(input, candidates);
+        let sel = (*selected).min(matches.len().saturating_sub(1));
+        let visible = matches.len().min(10);
+        let width = matches
+            .iter()
+            .take(visible.max(1))
+            .map(|c| c.0.len())
+            .max()
+            .unwrap_or(0)
+            .max(input.len() + 8)
+            .max(40) as u16
+            + 4;
+        let height = (visible as u16 + 3).min(area.height); // borders + input line
+        let popup = centered_rect(width, height, area);
+        f.render_widget(Clear, popup);
+        let block = popup_block(" Go to file ");
+        let inner = block.inner(popup);
+        f.render_widget(block, popup);
+        let mut lines = vec![Line::from(vec![
+            ratatui::text::Span::raw(format!(" {input}")),
+            ratatui::text::Span::styled(" ", Style::default().add_modifier(Modifier::REVERSED)),
+        ])];
+        // keep the selection visible if it scrolls past the shown window
+        let top = sel.saturating_sub(visible.saturating_sub(1));
+        for (i, c) in matches.iter().enumerate().skip(top).take(visible) {
+            let mut line = Line::from(format!(" {} ", c.0));
+            if i == sel {
+                line = line.style(Style::default().add_modifier(Modifier::REVERSED));
+            }
+            lines.push(line);
+        }
+        f.render_widget(Paragraph::new(lines), inner);
+    }
     if let Prompt::MoveFile {
         src,
         dests,
@@ -269,6 +308,9 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         }
         Prompt::Search(_) => format!("{mode}| Enter jump · Esc cancel"),
         Prompt::Rename { .. } => format!("{mode}| type the new name · Enter rename · Esc cancel"),
+        Prompt::GoToFile { .. } => {
+            format!("{mode}| type to filter · ↑/↓ or Ctrl+J/K choose · Enter open · Esc cancel")
+        }
         Prompt::ConfirmDelete { .. } | Prompt::MoveFile { .. } => {
             format!("{mode}| j/k choose · Enter confirm · Esc cancel")
         }
@@ -413,6 +455,38 @@ mod tests {
         let text = format!("{:?}", terminal.backend().buffer());
         assert!(text.contains("Rename")); // popup title
         assert!(text.contains("Enter rename")); // status bar hint
+    }
+
+    #[test]
+    fn go_to_file_popup_lists_filtered_results() {
+        let root = std::env::temp_dir().join("mrkdup-ui-gtf");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("apple.md"), "a\n").unwrap();
+        fs::write(root.join("banana.md"), "b\n").unwrap();
+        let mut app = App::new(root).unwrap();
+        let key =
+            |code| crossterm::event::KeyEvent::new(code, crossterm::event::KeyModifiers::NONE);
+        let ctrl = |c| {
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char(c),
+                crossterm::event::KeyModifiers::CONTROL,
+            )
+        };
+        app.handle_key(ctrl('b')); // hide the tree so its rows don't alias
+        app.handle_key(ctrl('p'));
+        for c in "ban".chars() {
+            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+        }
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let text = format!("{:?}", terminal.backend().buffer());
+        assert!(text.contains("Go to file")); // popup title
+        assert!(text.contains("ban")); // typed query
+        assert!(text.contains("banana.md")); // matching result listed
+        assert!(!text.contains("apple.md")); // filtered out
+        assert!(text.contains("Enter open")); // status bar hint
     }
 
     #[test]

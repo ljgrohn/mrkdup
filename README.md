@@ -29,6 +29,7 @@ mrkdup [directory]   # defaults to the current directory
 |---|---|---|
 | global | Ctrl+B | show/hide tree pane |
 | global | Ctrl+T | show/hide editor pane (tree goes full width) |
+| global | Ctrl+P | go to file (fuzzy finder popup: type to filter, ↑/↓ or Ctrl+J/K choose, Enter opens) |
 | global | Ctrl+Q / Ctrl+C | quit (autosaves; if disk changed, warns — press again to discard) |
 | editor | Esc / Shift+Tab | focus tree |
 | tree | Enter / Tab | open file (or expand/collapse dir) |

@@ -153,6 +153,10 @@ impl Tree {
         self.rebuild_keeping_selection();
     }
 
+    pub fn show_hidden(&self) -> bool {
+        self.show_hidden
+    }
+
     pub fn refresh(&mut self) {
         self.rebuild_keeping_selection();
     }
@@ -316,7 +320,9 @@ mod tests {
     #[test]
     fn toggle_hidden_shows_dotfiles() {
         let mut t = Tree::new(fixture("hidden")).unwrap();
+        assert!(!t.show_hidden());
         t.toggle_hidden();
+        assert!(t.show_hidden());
         assert!(names(&t).contains(&".hidden.md".to_string()));
         t.toggle_hidden();
         assert!(!names(&t).contains(&".hidden.md".to_string()));
