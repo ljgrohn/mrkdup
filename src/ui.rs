@@ -180,14 +180,22 @@ fn draw_tree(f: &mut Frame, app: &mut App, area: Rect) {
             };
             let text = format!("{}{}{}", "  ".repeat(row.depth), marker, row.name);
             let mut line = Line::from(text);
+            // the document shown in the editor pane stays marked
+            let is_open = app.editor.path.as_deref() == Some(row.path.as_path());
+            let mut style = if is_open {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
             if i == selected {
-                let style = if tree_focused {
-                    Style::default().add_modifier(Modifier::REVERSED)
-                } else {
-                    Style::default().add_modifier(Modifier::REVERSED | Modifier::DIM)
-                };
-                line = line.style(style);
+                style = style.add_modifier(Modifier::REVERSED);
+                if !tree_focused {
+                    style = style.add_modifier(Modifier::DIM);
+                }
             }
+            line = line.style(style);
             line
         })
         .collect();
