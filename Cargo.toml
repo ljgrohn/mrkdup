@@ -1,0 +1,17 @@
+[package]
+name = "markdup"
+version = "0.1.0"
+edition = "2021"
+description = "A terminal markdown editor with a file tree and soft wrap"
+license = "MIT"
+
+[dependencies]
+ratatui = "0.30"
+crossterm = "0.29"
+ratatui-textarea = "0.9"
+ignore = "0.4"
+unicode-width = "0.2"
+
+[profile.release]
+strip = true
+lto = true
