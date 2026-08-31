@@ -18,9 +18,12 @@ a thin, fast wrapper around plain files.
 - **Autosave.** Edits save on file switch, on quit, and after ~2s idle.
   No dirty-buffer juggling; only one open buffer at a time.
 - **Soft wrap from day one.** Long lines wrap visually at the pane edge.
-- **Editor architecture:** `ratatui-textarea` is the document engine
-  (buffer, cursor, edit ops, undo/redo, search). Its widget rendering is
-  never used; a custom renderer draws the wrapped view.
+- **Editor architecture (revised post-review):** `ratatui-textarea` is
+  both document engine and renderer. The original plan for a custom
+  wrapped renderer assumed the crate could not soft-wrap; review found
+  ratatui-textarea 0.9.2 has native soft wrap
+  (`set_wrap_mode(WrapMode::WordOrGlyph)`, already used by locdo), so
+  the widget renders directly and manages its own viewport/scroll.
 
 ## Layout
 
@@ -60,19 +63,17 @@ a thin, fast wrapper around plain files.
 
 ## Editor internals
 
-`WrapView` (module `wrap.rs`) is pure layout math, fully unit-testable:
+The event loop feeds key events into `TextArea::input()` for editing;
+the `TextArea` widget renders itself with
+`set_wrap_mode(WrapMode::WordOrGlyph)` (wrap at word boundaries, split
+words wider than the pane) and keeps the cursor visible in its own
+viewport. Notes discovered in review of crate 0.9.2:
 
-- Input: the document's logical lines, cursor (row, col), pane width,
-  pane height, current scroll.
-- Splits each logical line into display rows at the pane width using
-  `unicode-width` (never splitting a grapheme's cells).
-- Maps the logical cursor to a (display row, display col).
-- Adjusts vertical scroll (in display rows) so the cursor stays visible.
-- Output: the visible display rows + screen cursor position for ratatui.
-
-The event loop feeds key events into `TextArea::input()` for editing and
-reads `lines()` / `cursor()` for rendering. `TextArea`'s own viewport and
-render are unused.
+- Default keymap binds Ctrl+U=undo, Ctrl+R=redo, Ctrl+Y=paste. The app
+  intercepts Ctrl+Z / Ctrl+Y before `input()` and calls
+  `undo()` / `redo()` so the spec's keys hold.
+- `cursor()` returns `DataCursor(pub usize, pub usize)` (row, char col),
+  a tuple struct comparable to `(usize, usize)`.
 
 ## Saving and external changes
 
@@ -91,7 +92,7 @@ render are unused.
 | `app.rs` | App state, focus enum, key dispatch |
 | `tree.rs` | tree model, lazy loading, expand state, flatten-to-rows |
 | `editor.rs` | TextArea wrapper, save/autosave/conflict logic |
-| `wrap.rs` | pure soft-wrap layout math |
+| `ui.rs` | pane layout, tree + editor + status bar rendering |
 | `fsutil.rs` | binary sniff, atomic write |
 
 Dependencies: `ratatui 0.30`, `crossterm 0.29`, `ratatui-textarea 0.9`,
@@ -99,10 +100,9 @@ Dependencies: `ratatui 0.30`, `crossterm 0.29`, `ratatui-textarea 0.9`,
 
 ## Testing
 
-- Unit tests on the pure cores: wrap layout (unicode widths, empty lines,
-  exact-width lines, cursor mapping at boundaries), tree flatten/expand,
-  binary sniff, atomic write.
-- Render snapshots via ratatui `TestBackend` for the wrapped view.
+- Unit tests on the pure cores: tree flatten/expand, binary sniff,
+  atomic write, editor save/conflict logic, app key dispatch.
+- Render smoke test via ratatui `TestBackend`.
 - Interactive behavior verified by running the app.
 
 ## Out of scope for v1
