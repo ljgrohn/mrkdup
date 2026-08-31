@@ -306,12 +306,38 @@ impl App {
                 };
                 self.editor.textarea.move_cursor(mv);
             }
+            // typing "--0" expands to a markdown checkbox "- [ ] "
+            (false, KeyCode::Char('0'))
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::ALT | KeyModifiers::SUPER)
+                    && self.checkbox_trigger_armed() =>
+            {
+                self.editor.textarea.delete_char(); // the two dashes
+                self.editor.textarea.delete_char();
+                self.editor.textarea.insert_str("- [ ] ");
+                self.note_edit();
+            }
             _ => {
                 if self.editor.textarea.input(Input::from(key)) {
                     self.note_edit();
                 }
             }
         }
+    }
+
+    /// True when the two chars before the cursor are exactly "--"
+    /// (not part of a longer dash run).
+    fn checkbox_trigger_armed(&self) -> bool {
+        let DataCursor(row, col) = self.editor.textarea.cursor();
+        let Some(line) = self.editor.textarea.lines().get(row) else {
+            return false;
+        };
+        let before: Vec<char> = line.chars().take(col).collect();
+        col >= 2
+            && before[col - 1] == '-'
+            && before[col - 2] == '-'
+            && (col == 2 || before[col - 3] != '-')
     }
 
     fn note_edit(&mut self) {
@@ -691,6 +717,36 @@ mod tests {
         assert_eq!(app.editor.textarea.cursor(), (0, 5)); // end of "hello"
         app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::SUPER));
         assert_eq!(app.editor.textarea.cursor(), (0, 0));
+    }
+
+    #[test]
+    fn dash_dash_zero_expands_to_checkbox() {
+        let mut app = App::new(fixture("expand0")).unwrap();
+        app.handle_key(key(KeyCode::Enter)); // "hello", cursor at (0,0)
+        app.handle_key(key(KeyCode::Char('-')));
+        app.handle_key(key(KeyCode::Char('-')));
+        app.handle_key(key(KeyCode::Char('0')));
+        assert_eq!(app.editor.textarea.lines()[0], "- [ ] hello");
+        assert_eq!(app.editor.textarea.cursor(), (0, 6)); // ready to type the item
+        assert!(app.editor.dirty);
+    }
+
+    #[test]
+    fn plain_zero_still_types_zero() {
+        let mut app = App::new(fixture("zero")).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(key(KeyCode::Char('0')));
+        assert_eq!(app.editor.textarea.lines()[0], "0hello");
+    }
+
+    #[test]
+    fn triple_dash_zero_does_not_expand() {
+        let mut app = App::new(fixture("dashes")).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        for c in "---0".chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+        assert_eq!(app.editor.textarea.lines()[0], "---0hello");
     }
 
     #[test]
