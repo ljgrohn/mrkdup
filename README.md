@@ -112,8 +112,8 @@ On top of whichever theme that resolves to, mrkdup applies
 tweaks individual slots without redefining the whole palette. Both
 files use the same `key = value` format as the config file (`#`
 comments, blank lines, never fails — bad lines warn and are skipped,
-the rest still apply), and both are read once at startup; there's no
-live reload or in-app theme switcher.
+the rest still apply), and both are read once at startup — restart
+mrkdup to apply a change; there's no live reload or in-app theme switcher.
 
 Each `value` is one or more colors and modifiers:
 
@@ -135,6 +135,8 @@ alone is `Style::default()`; `default` combined with other parts
 (`default on blue`) means "reset that side to the terminal's own
 color." Tokens are case-insensitive; there are no spaces except
 around `on` (`cyan + bold` is a warning, not `cyan+bold` with padding).
+`bright-` applies only to black, red, green, yellow, blue, magenta, and
+cyan — there is no `bright-white`, `bright-gray`, or `bright-grey`.
 
 The settable keys are the `Theme` struct's field names — every pane
 and syntax slot mrkdup paints:

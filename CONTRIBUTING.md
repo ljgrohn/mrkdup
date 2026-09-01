@@ -18,6 +18,8 @@ that keep it that way are the most likely to land.
 - **Keep modules focused.** `tree.rs`, `editor.rs`, `app.rs`, `ui.rs`, and
   `fsutil.rs` each have one job. Logic goes in a testable module; `ui.rs` and
   `main.rs` stay thin glue.
+- **Colors live in `src/theme.rs`.** Don't add `Color::` literals in `ui.rs`,
+  `render.rs`, or `highlight.rs` — add a `Theme` slot instead.
 
 ## Workflow
 
