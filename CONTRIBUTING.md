@@ -24,7 +24,10 @@ that keep it that way are the most likely to land.
 1. Fork and branch from `main`.
 2. `cargo test` — add tests for tree, editor, or dispatch changes (the
    existing tests run against temp directories and synthetic key events, no
-   terminal needed).
+   terminal needed). Each module's tests live beside it in
+   `src/<module>/tests.rs`, declared with `#[cfg(test)] mod tests;` at the
+   bottom of `src/<module>.rs`; as a child module it can still reach the
+   module's private items.
 3. `cargo fmt` and `cargo clippy -- -D warnings` — CI enforces both.
 4. Open a PR with a short description of the behavior change.
 
