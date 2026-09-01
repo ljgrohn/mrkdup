@@ -53,9 +53,27 @@ pub(crate) fn sniff_call_count() -> usize {
 
 /// A file is "text" if its first 8KB contain no NUL byte.
 /// Unreadable/missing files are not text.
+///
+/// Anything that isn't a regular file — FIFO, socket, device, etc. — is
+/// "not text" and, critically, is never `open`ed to find that out: opening
+/// a FIFO for reading blocks until a writer shows up (forever, if none
+/// ever does), which used to hang the tree walk and fuzzy search whenever
+/// one turned up under the notes root. `fs::metadata` (which follows
+/// symlinks) never blocks on a FIFO, so we consult it first and bail
+/// before touching `File::open` for anything non-regular. A symlink that
+/// resolves to a regular file is unaffected: `metadata` reports the
+/// target's type, so it's sniffed exactly as before. A broken symlink (or
+/// any other path `metadata` can't stat) falls through to "not text",
+/// matching the missing-file case.
 pub fn is_text_file(path: &Path) -> bool {
     #[cfg(test)]
     SNIFF_CALLS.with(|c| c.set(c.get() + 1));
+    let Ok(meta) = fs::metadata(path) else {
+        return false;
+    };
+    if !meta.is_file() {
+        return false;
+    }
     let Ok(mut f) = File::open(path) else {
         return false;
     };
@@ -100,6 +118,27 @@ mod tests {
     #[test]
     fn utf8_content_is_text() {
         assert!(is_text_file(&tmp("uni.md", "héllo — 你好 🎉\n".as_bytes())));
+    }
+
+    /// A FIFO must never be `open`ed by `is_text_file`: opening a FIFO for
+    /// reading blocks until a writer connects, which (absent a writer)
+    /// blocks forever. The meaningful assertion here is that this test
+    /// *returns at all* — pre-fix, it hangs. Run the RED under a timeout
+    /// (e.g. `timeout 30 cargo test`) rather than letting it block CI.
+    #[cfg(unix)]
+    #[test]
+    fn fifo_is_not_text_and_is_not_opened() {
+        let dir = std::env::temp_dir().join("mrkdup-test-fifo");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let fifo = dir.join("pipe");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("mkfifo must be on PATH for this test");
+        assert!(status.success(), "mkfifo failed");
+
+        assert!(!is_text_file(&fifo));
     }
 
     #[test]

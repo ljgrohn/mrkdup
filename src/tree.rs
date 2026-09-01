@@ -387,6 +387,32 @@ mod tests {
         assert_eq!(names(&t), vec!["b-dir", "a.md", "zz.md"]);
     }
 
+    /// A FIFO in the tree is listed like the existing binary-file case
+    /// (`lists_dirs_first_then_files_sorted_no_binary_no_hidden` above):
+    /// `is_text_file` reports it as non-text, so `list_dir` omits it —
+    /// same semantics as `bin.dat`, just via a different `is_text_file`
+    /// path (metadata type check vs. NUL-byte sniff). The real point of
+    /// this test is that building the tree doesn't hang: opening a FIFO
+    /// for reading blocks forever absent a writer, and pre-fix this walk
+    /// would never return.
+    #[cfg(unix)]
+    #[test]
+    fn dir_with_fifo_lists_fine_and_does_not_hang() {
+        let root = std::env::temp_dir().join("mrkdup-tree-fifo");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("a.md"), "a\n").unwrap();
+        let fifo = root.join("pipe");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("mkfifo must be on PATH for this test");
+        assert!(status.success(), "mkfifo failed");
+
+        let t = Tree::new(root).unwrap();
+        assert_eq!(names(&t), vec!["a.md"]);
+    }
+
     #[test]
     fn expand_inserts_children_below() {
         let mut t = Tree::new(fixture("expand")).unwrap();
