@@ -739,6 +739,18 @@ pub(crate) fn find_ci(hay: &str, query: &str, from_char: usize) -> Option<usize>
     })
 }
 
+/// Renders a root-relative path as a forward-slash-separated string,
+/// normalized for display on all OS. Never converts to `to_string_lossy()`
+/// without joining with `/`.
+fn rel_display(root: &std::path::Path, path: &std::path::Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// All text files under `root` as (root-relative display path, absolute
 /// path), sorted by relative path, capped at 5000. Respects .gitignore,
 /// skips .git, and includes dotfiles only when `show_hidden` is set.
@@ -763,11 +775,7 @@ fn collect_candidates(root: &std::path::Path, show_hidden: bool) -> Vec<(String,
         if !crate::fsutil::is_text_file(&path) {
             continue;
         }
-        let rel = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .into_owned();
+        let rel = rel_display(root, &path);
         out.push((rel, path));
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1651,6 +1659,7 @@ mod tests {
                 assert!(rels.contains(&"a.md"));
                 assert!(rels.contains(&"docs/deep.md")); // walks subdirs, root-relative
                 assert!(!rels.iter().any(|r| r.contains("bin.dat"))); // text files only
+                assert!(!rels.iter().any(|s| s.contains('\\'))); // no backslashes on any OS
             }
             _ => panic!("expected go-to-file prompt"),
         }
