@@ -34,19 +34,22 @@ fn make_textarea(lines: Vec<String>) -> TextArea<'static> {
 }
 
 /// Detect the newline style from raw file bytes.
-/// If the file contains \r\n, prefer CRLF (majority or first occurrence).
-/// Otherwise (including empty files), default to LF.
+/// Scans for the first line terminator (\n):
+/// - If preceded by \r, return CRLF
+/// - Otherwise return LF
+/// - If no line terminator found (empty file), default to LF
 fn detect_newline(bytes: &[u8]) -> Newline {
-    if bytes.contains(&b'\r')
-        && bytes
-            .iter()
-            .zip(bytes.iter().skip(1))
-            .any(|(a, b)| *a == b'\r' && *b == b'\n')
-    {
-        Newline::CrLf
-    } else {
-        Newline::Lf
+    for i in 0..bytes.len() {
+        if bytes[i] == b'\n' {
+            if i > 0 && bytes[i - 1] == b'\r' {
+                return Newline::CrLf;
+            } else {
+                return Newline::Lf;
+            }
+        }
     }
+    // No line terminator found, default to LF.
+    Newline::Lf
 }
 
 impl Editor {
@@ -63,7 +66,8 @@ impl Editor {
     pub fn open(&mut self, path: &Path) -> io::Result<()> {
         let bytes = fs::read(path)?;
         self.newline = detect_newline(&bytes);
-        let text = String::from_utf8_lossy(&bytes);
+        let text =
+            String::from_utf8(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         self.textarea = make_textarea(text.lines().map(String::from).collect());
         self.path = Some(path.to_path_buf());
         self.dirty = false;
@@ -230,16 +234,14 @@ mod tests {
         ed.mark_dirty();
         assert!(matches!(ed.save(false).unwrap(), SaveOutcome::Saved));
 
-        // Verify file still contains \r\n (not converted to bare \n).
+        // Verify file uses only CRLF line endings (no bare \n).
         let bytes = fs::read(&p).unwrap();
-        assert!(
-            bytes.windows(2).any(|w| w == b"\r\n"),
-            "File should contain \\r\\n"
-        );
-        let content = String::from_utf8_lossy(&bytes);
-        assert!(
-            !content.contains("\r\n\n"),
-            "File should not have bare \\n after \\r\\n"
+        let lf_count = bytes.iter().filter(|&&b| b == b'\n').count();
+        let crlf_count = bytes.windows(2).filter(|w| w == b"\r\n").count();
+        assert_eq!(
+            lf_count, crlf_count,
+            "All line endings should be \\r\\n; LF count {} != CRLF count {}",
+            lf_count, crlf_count
         );
     }
 
@@ -293,6 +295,63 @@ mod tests {
         assert!(
             !bytes.windows(2).any(|w| w == b"\r\n"),
             "File should not contain \\r\\n"
+        );
+    }
+
+    #[test]
+    fn mixed_endings_first_line_terminator_wins_lf() {
+        // Create a file with mostly CRLF but the first line ends in bare LF.
+        // Per the policy, the first line terminator (\n) determines the style.
+        // Even though CRLF is the majority here, LF comes first.
+        let p = std::env::temp_dir().join("mrkdup-mixed-lf-first.md");
+        fs::write(&p, b"hello\nworld\r\nfoo\r\nbar\r\n").unwrap();
+
+        let mut ed = Editor::new();
+        ed.open(&p).unwrap();
+
+        // Verify it detected LF (first terminator).
+        assert_eq!(ed.newline, Newline::Lf);
+
+        // Edit and save.
+        ed.textarea.insert_str("!");
+        ed.mark_dirty();
+        assert!(matches!(ed.save(false).unwrap(), SaveOutcome::Saved));
+
+        // Verify file is now all LF (mixed endings converted to LF).
+        let bytes = fs::read(&p).unwrap();
+        assert!(
+            !bytes.windows(2).any(|w| w == b"\r\n"),
+            "File should not contain \\r\\n"
+        );
+    }
+
+    #[test]
+    fn mixed_endings_first_line_terminator_wins_crlf() {
+        // Create a file with mostly LF but the first line ends in CRLF.
+        // Per the policy, the first line terminator (\n) determines the style.
+        // Even though LF is the majority, CRLF comes first.
+        let p = std::env::temp_dir().join("mrkdup-mixed-crlf-first.md");
+        fs::write(&p, b"hello\r\nworld\nfoo\nbar\n").unwrap();
+
+        let mut ed = Editor::new();
+        ed.open(&p).unwrap();
+
+        // Verify it detected CRLF (first terminator).
+        assert_eq!(ed.newline, Newline::CrLf);
+
+        // Edit and save.
+        ed.textarea.insert_str("!");
+        ed.mark_dirty();
+        assert!(matches!(ed.save(false).unwrap(), SaveOutcome::Saved));
+
+        // Verify file is now all CRLF (mixed endings converted to CRLF).
+        let bytes = fs::read(&p).unwrap();
+        let lf_count = bytes.iter().filter(|&&b| b == b'\n').count();
+        let crlf_count = bytes.windows(2).filter(|w| w == b"\r\n").count();
+        assert_eq!(
+            lf_count, crlf_count,
+            "All line endings should be \\r\\n; LF count {} != CRLF count {}",
+            lf_count, crlf_count
         );
     }
 }
