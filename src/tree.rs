@@ -189,7 +189,7 @@ impl Tree {
     }
 
     fn push_children(&mut self, dir: &Path, depth: usize) {
-        for (path, is_dir) in list_dir(dir, self.show_hidden) {
+        for (path, is_dir) in list_dir(dir, &self.root, self.show_hidden) {
             let name = path
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
@@ -209,10 +209,41 @@ impl Tree {
     }
 }
 
+/// Builds a `Gitignore` matcher from `{root}/.gitignore` only (not the
+/// user's global gitignore — callers keep `git_global(false)` so tests
+/// stay hermetic, and not nested `.gitignore` files below `root`, which
+/// the walker in `list_dir` already applies on its own when a directory
+/// containing one is itself the walk root). Matches are made against
+/// paths relative to `root`, so a rule at the tree root also applies to
+/// files listed several directories below it.
+pub(crate) fn root_gitignore(root: &Path) -> ignore::gitignore::Gitignore {
+    let (matcher, _err) = ignore::gitignore::Gitignore::new(root.join(".gitignore"));
+    matcher
+}
+
+/// Whether `path` (rooted under `root`) is ignored by `ignores`, a
+/// matcher built by `root_gitignore`.
+pub(crate) fn is_root_ignored(
+    ignores: &ignore::gitignore::Gitignore,
+    root: &Path,
+    path: &Path,
+    is_dir: bool,
+) -> bool {
+    match path.strip_prefix(root) {
+        Ok(rel) if !rel.as_os_str().is_empty() => {
+            ignores.matched_path_or_any_parents(rel, is_dir).is_ignore()
+        }
+        _ => false,
+    }
+}
+
 /// List one directory: dirs and text files, dirs first, each group
-/// sorted case-insensitively. Honors per-directory .gitignore.
-fn list_dir(dir: &Path, show_hidden: bool) -> Vec<(PathBuf, bool)> {
+/// sorted case-insensitively. Honors per-directory .gitignore, plus the
+/// tree root's own .gitignore (which a plain `WalkBuilder::new(dir)`
+/// with `parents(false)` would otherwise miss for `dir != root`).
+fn list_dir(dir: &Path, root: &Path, show_hidden: bool) -> Vec<(PathBuf, bool)> {
     let mut out = Vec::new();
+    let ignores = root_gitignore(root);
     let walker = ignore::WalkBuilder::new(dir)
         .max_depth(Some(1))
         .hidden(!show_hidden)
@@ -229,6 +260,9 @@ fn list_dir(dir: &Path, show_hidden: bool) -> Vec<(PathBuf, bool)> {
         }
         let is_dir = entry.file_type().is_some_and(|t| t.is_dir());
         let path = entry.into_path();
+        if is_root_ignored(&ignores, root, &path, is_dir) {
+            continue;
+        }
         if is_dir || crate::fsutil::is_text_file(&path) {
             out.push((path, is_dir));
         }
@@ -400,6 +434,22 @@ mod tests {
         // a missing path leaves the selection where it was
         assert!(!t.select_path(Path::new("/nonexistent/nope.md")));
         assert_eq!(t.selected_row().unwrap().name, "zz.md");
+    }
+
+    #[test]
+    fn expand_honors_root_gitignore_for_nested_files() {
+        let root = std::env::temp_dir().join("mrkdup-tree-rootignore");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("notes")).unwrap();
+        fs::write(root.join(".gitignore"), "*.log\n").unwrap();
+        fs::write(root.join("notes/debug.log"), "d\n").unwrap();
+        fs::write(root.join("notes/keep.md"), "k\n").unwrap();
+
+        let mut t = Tree::new(root).unwrap();
+        t.expand(); // selection starts at 0 = notes
+        let rows = names(&t);
+        assert!(rows.contains(&"keep.md".to_string()));
+        assert!(!rows.contains(&"debug.log".to_string()));
     }
 
     #[test]

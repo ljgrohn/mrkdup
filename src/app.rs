@@ -757,6 +757,7 @@ fn rel_display(root: &std::path::Path, path: &std::path::Path) -> String {
 fn collect_candidates(root: &std::path::Path, show_hidden: bool) -> Vec<(String, PathBuf)> {
     const CAP: usize = 5000;
     let mut out = Vec::new();
+    let ignores = crate::tree::root_gitignore(root);
     let walker = ignore::WalkBuilder::new(root)
         .hidden(!show_hidden)
         .require_git(false)
@@ -772,6 +773,9 @@ fn collect_candidates(root: &std::path::Path, show_hidden: bool) -> Vec<(String,
             continue;
         }
         let path = entry.into_path();
+        if crate::tree::is_root_ignored(&ignores, root, &path, false) {
+            continue;
+        }
         if !crate::fsutil::is_text_file(&path) {
             continue;
         }
@@ -1808,5 +1812,20 @@ mod tests {
             fs::read_to_string(root.join("a.md")).unwrap(),
             "Yhello\nworld\n"
         );
+    }
+
+    #[test]
+    fn collect_candidates_honors_root_gitignore_for_nested_files() {
+        let root = std::env::temp_dir().join("mrkdup-app-rootignore");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("notes")).unwrap();
+        fs::write(root.join(".gitignore"), "*.log\n").unwrap();
+        fs::write(root.join("notes/debug.log"), "d\n").unwrap();
+        fs::write(root.join("notes/keep.md"), "k\n").unwrap();
+
+        let candidates = collect_candidates(&root, false);
+        let rels: Vec<&str> = candidates.iter().map(|(rel, _)| rel.as_str()).collect();
+        assert!(rels.contains(&"notes/keep.md"));
+        assert!(!rels.contains(&"notes/debug.log"));
     }
 }
