@@ -56,7 +56,7 @@ mrkdup [directory]   # defaults to the current directory
 | tree | . | toggle hidden files |
 | editor | Ctrl+S | save (after a disk-conflict warning, a second Ctrl+S overwrites) |
 | editor | Ctrl+Z / Ctrl+Y | undo / redo |
-| editor | Ctrl+D | toggle checkbox on the line (`- [ ]` ↔ `- [x]`; other lines gain a `- [ ] ` prefix) |
+| editor | Ctrl+D | toggle checkbox on the line (`- [ ]` ↔ `- [x]`, `- [X]` → `- [ ]`; other lines gain a `- [ ] ` prefix; Ctrl+Z twice undoes) |
 | editor | Ctrl+F | search in file (popup; case-insensitive; Enter jumps and highlights all matches; empty search repeats the last one) |
 | editor | Ctrl+G | jump to the next match of the last search |
 | editor | Ctrl+J / Ctrl+K | next / previous word |

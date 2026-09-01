@@ -849,6 +849,8 @@ fn toggle_checkbox_line(line: &str) -> String {
         format!("{indent}- [x]{tail}")
     } else if let Some(tail) = rest.strip_prefix("- [x]") {
         format!("{indent}- [ ]{tail}")
+    } else if let Some(tail) = rest.strip_prefix("- [X]") {
+        format!("{indent}- [ ]{tail}")
     } else if let Some(tail) = rest.strip_prefix("- ") {
         format!("{indent}- [ ] {tail}")
     } else {
@@ -1241,6 +1243,16 @@ mod tests {
     fn ctrl_d_unchecks_a_checked_checkbox() {
         let root = fixture("cb-uncheck");
         fs::write(root.join("a.md"), "- [x] milk\n").unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(ctrl('d'));
+        assert_eq!(app.editor.textarea.lines()[0], "- [ ] milk");
+    }
+
+    #[test]
+    fn ctrl_d_unchecks_uppercase_checked_checkbox() {
+        let root = fixture("cb-uncheck-upper");
+        fs::write(root.join("a.md"), "- [X] milk\n").unwrap();
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('d'));
