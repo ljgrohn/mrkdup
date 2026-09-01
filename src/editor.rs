@@ -6,6 +6,12 @@ use std::time::SystemTime;
 
 use crate::fsutil;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Newline {
+    Lf,
+    CrLf,
+}
+
 pub enum SaveOutcome {
     Saved,
     Clean,
@@ -18,12 +24,29 @@ pub struct Editor {
     pub path: Option<PathBuf>,
     pub dirty: bool,
     mtime: Option<SystemTime>,
+    newline: Newline,
 }
 
 // rendering (wrap, styling, cursor, search highlight) lives in render.rs;
 // the textarea here is purely the editing engine
 fn make_textarea(lines: Vec<String>) -> TextArea<'static> {
     TextArea::from(lines)
+}
+
+/// Detect the newline style from raw file bytes.
+/// If the file contains \r\n, prefer CRLF (majority or first occurrence).
+/// Otherwise (including empty files), default to LF.
+fn detect_newline(bytes: &[u8]) -> Newline {
+    if bytes.contains(&b'\r')
+        && bytes
+            .iter()
+            .zip(bytes.iter().skip(1))
+            .any(|(a, b)| *a == b'\r' && *b == b'\n')
+    {
+        Newline::CrLf
+    } else {
+        Newline::Lf
+    }
 }
 
 impl Editor {
@@ -33,11 +56,14 @@ impl Editor {
             path: None,
             dirty: false,
             mtime: None,
+            newline: Newline::Lf,
         }
     }
 
     pub fn open(&mut self, path: &Path) -> io::Result<()> {
-        let text = fs::read_to_string(path)?;
+        let bytes = fs::read(path)?;
+        self.newline = detect_newline(&bytes);
+        let text = String::from_utf8_lossy(&bytes);
         self.textarea = make_textarea(text.lines().map(String::from).collect());
         self.path = Some(path.to_path_buf());
         self.dirty = false;
@@ -50,8 +76,12 @@ impl Editor {
     }
 
     fn content(&self) -> String {
-        let mut s = self.textarea.lines().join("\n");
-        s.push('\n');
+        let newline_str = match self.newline {
+            Newline::Lf => "\n",
+            Newline::CrLf => "\r\n",
+        };
+        let mut s = self.textarea.lines().join(newline_str);
+        s.push_str(newline_str);
         s
     }
 
@@ -180,5 +210,89 @@ mod tests {
         fs::write(&p, "theirs\n").unwrap();
         assert!(!ed.check_external().unwrap());
         assert_eq!(ed.textarea.lines()[0], "minex");
+    }
+
+    #[test]
+    fn crlf_round_trip_preserved_on_edit_and_save() {
+        // Create a file with CRLF endings using raw bytes.
+        let p = std::env::temp_dir().join("mrkdup-crlf-rt.md");
+        fs::write(&p, b"hello\r\nworld\r\n").unwrap();
+
+        let mut ed = Editor::new();
+        ed.open(&p).unwrap();
+
+        // Verify it detected CRLF.
+        assert_eq!(ed.newline, Newline::CrLf);
+        assert_eq!(ed.textarea.lines(), ["hello", "world"]);
+
+        // Edit and save.
+        ed.textarea.insert_str("!");
+        ed.mark_dirty();
+        assert!(matches!(ed.save(false).unwrap(), SaveOutcome::Saved));
+
+        // Verify file still contains \r\n (not converted to bare \n).
+        let bytes = fs::read(&p).unwrap();
+        assert!(
+            bytes.windows(2).any(|w| w == b"\r\n"),
+            "File should contain \\r\\n"
+        );
+        let content = String::from_utf8_lossy(&bytes);
+        assert!(
+            !content.contains("\r\n\n"),
+            "File should not have bare \\n after \\r\\n"
+        );
+    }
+
+    #[test]
+    fn lf_round_trip_preserved_on_edit_and_save() {
+        // Create a file with LF endings.
+        let p = std::env::temp_dir().join("mrkdup-lf-rt.md");
+        fs::write(&p, b"hello\nworld\n").unwrap();
+
+        let mut ed = Editor::new();
+        ed.open(&p).unwrap();
+
+        // Verify it detected LF.
+        assert_eq!(ed.newline, Newline::Lf);
+        assert_eq!(ed.textarea.lines(), ["hello", "world"]);
+
+        // Edit and save.
+        ed.textarea.insert_str("!");
+        ed.mark_dirty();
+        assert!(matches!(ed.save(false).unwrap(), SaveOutcome::Saved));
+
+        // Verify file still contains only \n (not \r\n).
+        let bytes = fs::read(&p).unwrap();
+        assert!(
+            !bytes.windows(2).any(|w| w == b"\r\n"),
+            "File should not contain \\r\\n"
+        );
+        let content = String::from_utf8_lossy(&bytes);
+        assert!(content.contains('\n'), "File should contain \\n");
+    }
+
+    #[test]
+    fn empty_file_defaults_to_lf() {
+        // Create an empty file.
+        let p = std::env::temp_dir().join("mrkdup-empty.md");
+        fs::write(&p, b"").unwrap();
+
+        let mut ed = Editor::new();
+        ed.open(&p).unwrap();
+
+        // Verify it defaults to LF for empty files.
+        assert_eq!(ed.newline, Newline::Lf);
+
+        // Type content and save.
+        ed.textarea.insert_str("hello");
+        ed.mark_dirty();
+        assert!(matches!(ed.save(false).unwrap(), SaveOutcome::Saved));
+
+        // Verify file has only \n.
+        let bytes = fs::read(&p).unwrap();
+        assert!(
+            !bytes.windows(2).any(|w| w == b"\r\n"),
+            "File should not contain \\r\\n"
+        );
     }
 }

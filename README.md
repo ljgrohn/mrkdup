@@ -106,3 +106,4 @@ Keybindings are not remappable.
 - If a file changed on disk while your buffer is clean, it reloads
   silently. If your buffer is dirty, mrkdup refuses to clobber the disk
   and asks you to confirm with a second Ctrl+S.
+- Line endings are preserved: CRLF files stay CRLF, LF files stay LF.
