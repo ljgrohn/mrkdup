@@ -55,6 +55,7 @@ mrkdup [directory]   # defaults to the current directory
 | tree | - | go up: re-root the tree at the parent directory |
 | tree | + | zoom in: make the selected folder the tree root (a file: its folder) |
 | tree | . | toggle hidden files (dotfiles and anything matched by `.gitignore`) |
+| tree | ? | show the key cheat sheet (the launch page) over the editor; any key closes it |
 | editor | Ctrl+S | save (after a disk-conflict warning, a second Ctrl+S overwrites) |
 | editor | Ctrl+Z / Ctrl+Y | undo / redo |
 | editor | Ctrl+D | toggle checkbox on the line (`- [ ]` ↔ `- [x]`, `- [X]` → `- [ ]`; other lines gain a `- [ ] ` prefix; Ctrl+Z twice undoes) |

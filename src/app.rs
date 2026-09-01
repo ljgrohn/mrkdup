@@ -16,6 +16,8 @@ pub enum Focus {
 
 pub enum Prompt {
     None,
+    /// The key cheat sheet, drawn over the editor pane; any key closes it.
+    Help,
     NewFile(String),
     Search(String),
     ConfirmDelete {
@@ -158,6 +160,7 @@ impl App {
             KeyCode::Char('g') => self.tree.move_top(),
             KeyCode::Char('G') => self.tree.move_bottom(),
             KeyCode::Char('.') => self.tree.toggle_hidden(),
+            KeyCode::Char('?') => self.prompt = Prompt::Help,
             KeyCode::Char('-') => self.tree.ascend(),
             KeyCode::Char('+') => self.tree.make_root(),
             KeyCode::Char('n') => self.prompt = Prompt::NewFile(String::new()),
@@ -512,6 +515,8 @@ impl App {
             return;
         }
         match &mut self.prompt {
+            // the cheat sheet: any key closes it and is otherwise consumed
+            Prompt::Help => self.prompt = Prompt::None,
             Prompt::NewFile(s) | Prompt::Search(s) => match key.code {
                 KeyCode::Backspace => {
                     s.pop();
@@ -1538,6 +1543,30 @@ mod tests {
             }
             _ => panic!("expected go-to-file prompt"),
         }
+    }
+
+    #[test]
+    fn question_mark_opens_help_and_any_key_closes_it() {
+        let mut app = App::new(fixture("help"), Config::default()).unwrap();
+        app.handle_key(key(KeyCode::Char('?')));
+        assert!(matches!(app.prompt, Prompt::Help));
+        // a tree key while help is open closes help; it is not dispatched
+        app.handle_key(key(KeyCode::Char('j')));
+        assert!(matches!(app.prompt, Prompt::None));
+        assert_eq!(app.tree.selected_row().unwrap().name, "a.md");
+
+        app.handle_key(key(KeyCode::Char('?')));
+        app.handle_key(key(KeyCode::Esc));
+        assert!(matches!(app.prompt, Prompt::None));
+    }
+
+    #[test]
+    fn question_mark_in_the_editor_types_a_character() {
+        let mut app = App::new(fixture("help-editor"), Config::default()).unwrap();
+        app.handle_key(key(KeyCode::Enter)); // open a.md, focus editor
+        app.handle_key(key(KeyCode::Char('?')));
+        assert!(matches!(app.prompt, Prompt::None));
+        assert_eq!(app.editor.lines()[0], "?hello");
     }
 
     #[test]

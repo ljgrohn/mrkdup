@@ -71,6 +71,22 @@ fn draw_input_popup(f: &mut Frame, area: Rect, title: &str, input: &str) {
 }
 
 fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
+    if let Prompt::Help = &app.prompt {
+        let lines = key_lines();
+        let width = lines.iter().map(|l| l.width()).max().unwrap_or(0) as u16 + 4;
+        let popup = centered_rect(width, lines.len() as u16 + 2, area);
+        f.render_widget(Clear, popup);
+        let block = popup_block(" Keys ");
+        let inner = block.inner(popup);
+        f.render_widget(block, popup);
+        // left-aligned so the key column lines up; one cell of padding
+        let padded = Rect {
+            x: inner.x + 1,
+            width: inner.width.saturating_sub(2),
+            ..inner
+        };
+        f.render_widget(Paragraph::new(lines), padded);
+    }
     if let Prompt::NewFile(input) = &app.prompt {
         draw_input_popup(f, area, " New file ", input);
     }
@@ -302,27 +318,37 @@ fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
     crate::render::render_editor(f, view, inner, focused);
 }
 
-/// The keys most useful before any file is open, shown centered and dim
-/// in the editor pane until the first file opens.
-fn draw_welcome(f: &mut Frame, area: Rect) {
-    let keys = [
+/// The key cheat sheet, one `key  action` line per row, shared by the
+/// launch page and the `?` help overlay so the two can't drift. Tree keys
+/// first (that's where focus starts), then the globals.
+fn key_lines() -> Vec<Line<'static>> {
+    const KEYS: &[(&str, &str)] = &[
         ("Enter", "open file"),
         ("n", "new file"),
         ("p", "go to file"),
         ("m", "move"),
         ("r", "rename"),
         ("x", "delete"),
+        (".", "hidden files (dotfiles + gitignored)"),
+        ("- / +", "go up / zoom in"),
+        ("u", "refresh"),
         ("Ctrl+B/Ctrl+T", "panes"),
+        ("?", "help"),
         ("q", "quit"),
     ];
+    KEYS.iter()
+        .map(|(k, v)| Line::from(format!("{k:>13}  {v}")))
+        .collect()
+}
+
+/// The cheat sheet, shown centered and dim in the editor pane until the
+/// first file opens.
+fn draw_welcome(f: &mut Frame, area: Rect) {
     let mut lines = vec![
         Line::from("mrkdup").alignment(Alignment::Center),
         Line::from(""),
     ];
-    lines.extend(
-        keys.iter()
-            .map(|(k, v)| Line::from(format!("{k:>13}  {v}"))),
-    );
+    lines.extend(key_lines());
     let width = lines.iter().map(|l| l.width()).max().unwrap_or(0) as u16;
     let rect = centered_rect(width, lines.len() as u16, area);
     f.render_widget(
@@ -353,6 +379,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         Prompt::NewFile(_) => {
             format!("{mode}| type a name (dir/name.md works) · Enter create · Esc cancel")
         }
+        Prompt::Help => format!("{mode}| any key closes"),
         Prompt::Search(_) => format!("{mode}| Enter jump · Esc cancel"),
         Prompt::Rename { .. } => format!("{mode}| type the new name · Enter rename · Esc cancel"),
         Prompt::GoToFile { .. } => {
@@ -585,6 +612,47 @@ mod tests {
         assert!(!text.contains("go to file"));
         assert!(!text.contains("quit"));
         assert!(text.contains("hello"));
+    }
+
+    #[test]
+    fn help_overlay_shows_the_full_key_list_over_an_open_file() {
+        let root = std::env::temp_dir().join("help-overlay-fx");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("a.md"), "hello\n").unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
+        let backend = TestBackend::new(80, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        // the launch page lists the hidden-files toggle and the help key
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let text = format!("{:?}", terminal.backend().buffer());
+        assert!(text.contains("hidden files"));
+        assert!(text.contains("help"));
+
+        let press = |app: &mut App, code: crossterm::event::KeyCode| {
+            app.handle_key(crossterm::event::KeyEvent::new(
+                code,
+                crossterm::event::KeyModifiers::NONE,
+            ))
+        };
+        press(&mut app, crossterm::event::KeyCode::Enter); // open a.md
+        press(&mut app, crossterm::event::KeyCode::Esc); // focus tree
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let text = format!("{:?}", terminal.backend().buffer());
+        assert!(!text.contains("hidden files"));
+
+        press(&mut app, crossterm::event::KeyCode::Char('?'));
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let text = format!("{:?}", terminal.backend().buffer());
+        assert!(text.contains("hidden files"));
+        assert!(text.contains("go to file"));
+        assert!(text.contains("any key closes"));
+
+        press(&mut app, crossterm::event::KeyCode::Esc);
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let text = format!("{:?}", terminal.backend().buffer());
+        assert!(!text.contains("hidden files"));
     }
 
     #[test]
