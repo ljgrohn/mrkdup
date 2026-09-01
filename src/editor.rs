@@ -68,9 +68,13 @@ impl Editor {
 
     pub fn open(&mut self, path: &Path) -> io::Result<()> {
         let bytes = fs::read(path)?;
-        self.newline = detect_newline(&bytes);
+        let newline = detect_newline(&bytes);
         let text =
             String::from_utf8(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        // Nothing above mutates `self` — a failed read or a failed UTF-8
+        // validation leaves the currently-open document untouched. Once
+        // we're past validation the rest can't fail, so assign here.
+        self.newline = newline;
         self.textarea = make_textarea(text.lines().map(String::from).collect());
         self.path = Some(path.to_path_buf());
         self.dirty = false;
@@ -242,6 +246,36 @@ mod tests {
         ed.open(&p).unwrap();
         assert_eq!(ed.textarea.lines(), ["# a", "", "b"]);
         assert!(!ed.dirty);
+    }
+
+    #[test]
+    fn failed_open_does_not_mutate_the_still_open_document() {
+        // an LF document is already open...
+        let good = tmpfile("txn-good", "line1\nline2\n");
+        let mut ed = Editor::new();
+        ed.open(&good).unwrap();
+        assert_eq!(ed.newline, Newline::Lf);
+
+        // ...then an open of an invalid-UTF-8 (e.g. Latin-1) file fails —
+        // and its bytes are CRLF, so a buggy detect-before-validate order
+        // would stamp CRLF onto the still-open LF document below...
+        let bad = std::env::temp_dir().join("mrkdup-ed-txn-bad.md");
+        fs::write(&bad, [b'x', b'\r', b'\n', 0xff, b'y']).unwrap();
+        assert!(ed.open(&bad).is_err());
+
+        // ...and the still-open LF document is untouched: same path, same
+        // newline style, not marked dirty by the failed attempt.
+        assert_eq!(ed.path.as_deref(), Some(good.as_path()));
+        assert_eq!(ed.newline, Newline::Lf);
+        assert!(!ed.dirty);
+
+        // editing and saving the still-open document preserves LF endings
+        // and its content, rather than picking up CRLF from the failed
+        // open's (never-validated) bytes.
+        ed.textarea.insert_str("hi ");
+        ed.mark_dirty();
+        assert!(matches!(ed.save(false).unwrap(), SaveOutcome::Saved));
+        assert_eq!(fs::read_to_string(&good).unwrap(), "hi line1\nline2\n");
     }
 
     #[test]
