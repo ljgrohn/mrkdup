@@ -95,11 +95,7 @@ pub fn move_to(
         editor.path = Some(target.clone());
     }
     tree.refresh();
-    let shown = target
-        .strip_prefix(tree.root())
-        .unwrap_or(&target)
-        .to_string_lossy()
-        .into_owned();
+    let shown = crate::fuzzy::rel_display(tree.root(), &target);
     Ok(Some(format!("moved to {shown}")))
 }
 

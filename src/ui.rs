@@ -366,12 +366,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
                 .editor
                 .path
                 .as_deref()
-                .map(|p| {
-                    p.strip_prefix(app.tree.root())
-                        .unwrap_or(p)
-                        .to_string_lossy()
-                        .into_owned()
-                })
+                .map(|p| crate::fuzzy::rel_display(app.tree.root(), p))
                 .unwrap_or_else(|| "[no file]".into());
             let dirty = if app.editor.dirty { "*" } else { "" };
             let (row, col) = app.editor.cursor();
