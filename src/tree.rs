@@ -365,9 +365,19 @@ mod tests {
     ///     zz.md
     ///     bin.dat        (binary, hidden from tree)
     ///     .hidden.md     (dotfile)
+    /// Nested one level inside `mrkdup-tree-{tag}` (a directory this test
+    /// owns) rather than returning that directory itself: `ascend`/`-`
+    /// reroots the tree at the fixture's *parent*, and if the fixture
+    /// root were the top-level temp dir entry, that parent would be the
+    /// real shared system temp dir. Walking that for real hangs on
+    /// GitHub's Ubuntu/macOS runners, which leave FIFOs sitting in temp
+    /// (see the `is_text_file` fix) -- so every reroot/ascend test needs
+    /// its fixture's parent to still be something this test created and
+    /// controls.
     fn fixture(tag: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!("mrkdup-tree-{tag}"));
-        let _ = fs::remove_dir_all(&root);
+        let owned = std::env::temp_dir().join(format!("mrkdup-tree-{tag}"));
+        let _ = fs::remove_dir_all(&owned);
+        let root = owned.join("root");
         fs::create_dir_all(root.join("b-dir")).unwrap();
         fs::write(root.join("b-dir/inner.md"), "x\n").unwrap();
         fs::write(root.join("a.md"), "a\n").unwrap();

@@ -662,9 +662,18 @@ mod tests {
     fn ctrl(c: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
     }
+    /// Nested one level inside `mrkdup-app-{tag}` (a directory this test
+    /// owns) rather than returning that directory itself: `dash_reroots_
+    /// tree_at_parent` reroots the tree at the fixture's *parent*, and if
+    /// the fixture root were the top-level temp dir entry, that parent
+    /// would be the real shared system temp dir -- which hangs on
+    /// GitHub's Ubuntu/macOS runners (see the `is_text_file` fix; they
+    /// leave FIFOs sitting in temp). Keeping the parent owned by the test
+    /// avoids that regardless of what's in the real temp dir.
     fn fixture(tag: &str) -> std::path::PathBuf {
-        let root = std::env::temp_dir().join(format!("mrkdup-app-{tag}"));
-        let _ = fs::remove_dir_all(&root);
+        let owned = std::env::temp_dir().join(format!("mrkdup-app-{tag}"));
+        let _ = fs::remove_dir_all(&owned);
+        let root = owned.join("root");
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("a.md"), "hello\nworld\n").unwrap();
         fs::write(root.join("b.md"), "bee\n").unwrap();
