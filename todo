@@ -16,3 +16,9 @@
   crates.io (grabs the name), tag v0.1.0, add a CI badge to the
   README, and set up cargo-dist (or a release workflow) so tagged
   releases ship prebuilt binaries for mac/linux/windows.
+
+- [ ] Themes (after harden Package C; not a v0.1 blocker)
+  Plan: docs/superpowers/plans/2026-08-31-mrkdup-themes.md
+  Extract Theme (only Color:: lives there) → theme = default|light|mono
+  → user overlay file + named themes/<name>. No new keys, no new
+  crates, no per-project config, no live reload.

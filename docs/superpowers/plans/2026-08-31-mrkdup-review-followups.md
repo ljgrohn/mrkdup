@@ -626,6 +626,8 @@ file does not specify cargo-dist config.
 - Prompt mini-editor (left/right/home/end in rename). Append/backspace
   is fine for v0.1.
 - Keybind remapping, themes, vim mode, tabs/splits, `notify` watcher.
+  Themes have their own plan (run after Package C, not a v0.1 blocker):
+  `docs/superpowers/plans/2026-08-31-mrkdup-themes.md`.
 - Replacing `ratatui-textarea` as the engine.
 - Stacking highlight styles (Heading+Bold) unless B3 stays trivial.
 - Changing tab width to tab-stops.
