@@ -51,6 +51,14 @@ pub fn render_editor(f: &mut Frame, view: EditorView, inner: Rect, focused: bool
         .filter(|q| !q.is_empty())
         .map(|q| (q.to_string(), q.chars().count()));
 
+    // Span cursor state, carried across rows: within the visible window
+    // `row.line` only ever increases (rows are generated in line order,
+    // and wrapped rows of one line run start..end contiguously), so a
+    // single advancing index per line gives O(1) amortized lookup per
+    // painted character instead of an O(spans) scan per character.
+    let mut span_cursor_line: Option<usize> = None;
+    let mut span_i: usize = 0;
+
     let out: Vec<Line> = rows
         .iter()
         .skip(*scroll)
@@ -66,9 +74,21 @@ pub fn render_editor(f: &mut Frame, view: EditorView, inner: Rect, focused: bool
                     from = p + 1;
                 }
             }
+            let line_spans = &spans[row.line];
+            if span_cursor_line != Some(row.line) {
+                span_cursor_line = Some(row.line);
+                span_i = 0;
+            }
             let mut runs: Vec<(String, Style)> = Vec::new();
             for (ci, &ch) in chars.iter().enumerate().take(row.end).skip(row.start) {
-                let mut st = style_at(&spans[row.line], ci);
+                while span_i < line_spans.len() && ci >= line_spans[span_i].end {
+                    span_i += 1;
+                }
+                let mut st = line_spans
+                    .get(span_i)
+                    .filter(|s| ci >= s.start && ci < s.end)
+                    .map(|s| highlight::style(s.kind))
+                    .unwrap_or_default();
                 if match_ranges.iter().any(|&(a, b)| ci >= a && ci < b) {
                     st = st.bg(Color::Yellow).fg(Color::Black);
                 }
@@ -99,14 +119,6 @@ pub fn render_editor(f: &mut Frame, view: EditorView, inner: Rect, focused: bool
         let y = inner.y + (cvrow - *scroll) as u16;
         f.set_cursor_position((x, y));
     }
-}
-
-fn style_at(spans: &[highlight::SpanTok], ci: usize) -> Style {
-    spans
-        .iter()
-        .find(|s| ci >= s.start && ci < s.end)
-        .map(|s| highlight::style(s.kind))
-        .unwrap_or_default()
 }
 
 fn in_selection(sel: Option<((usize, usize), (usize, usize))>, line: usize, ci: usize) -> bool {
