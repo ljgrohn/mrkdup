@@ -1,4 +1,4 @@
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::Path;
 
@@ -11,11 +11,29 @@ pub fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
     let tmp = dir.join(format!(".{}.mrkdup-tmp", name.to_string_lossy()));
     {
-        let mut f = File::create(&tmp)?;
-        f.write_all(contents)?;
-        f.sync_all()?;
+        let mut f = match File::create(&tmp) {
+            Ok(f) => f,
+            Err(e) => {
+                let _ = fs::remove_file(&tmp);
+                return Err(e);
+            }
+        };
+        if let Err(e) = f.write_all(contents) {
+            let _ = fs::remove_file(&tmp);
+            return Err(e);
+        }
+        if let Err(e) = f.sync_all() {
+            let _ = fs::remove_file(&tmp);
+            return Err(e);
+        }
     }
-    std::fs::rename(&tmp, path)
+    match std::fs::rename(&tmp, path) {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            let _ = fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
 }
 
 /// A file is "text" if its first 8KB contain no NUL byte.
@@ -97,5 +115,30 @@ mod tests {
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, vec!["out.md"]);
+    }
+
+    #[test]
+    fn atomic_write_deletes_temp_file_on_rename_failure() {
+        let dir = std::env::temp_dir().join("mrkdup-test-aw-cleanup");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let out_path = dir.join("out.md");
+        // Create a directory with the target name so rename will fail
+        fs::create_dir(&out_path).unwrap();
+
+        let tmp_path = dir.join(".out.md.mrkdup-tmp");
+        // Call atomic_write, which should fail because it can't rename over a directory
+        let result = atomic_write(&out_path, b"content\n");
+        assert!(
+            result.is_err(),
+            "atomic_write should fail when target is a directory"
+        );
+
+        // The key assertion: temp file must be cleaned up
+        assert!(
+            !tmp_path.exists(),
+            "temp file should be deleted after atomic_write fails"
+        );
     }
 }
