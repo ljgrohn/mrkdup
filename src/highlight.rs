@@ -143,7 +143,12 @@ fn highlight_line(line: &str, idx: usize, state: &mut State, kind: FileKind) -> 
     let hashes = chars.iter().take_while(|&&c| c == '#').count();
     if (1..=6).contains(&hashes) && chars.get(hashes) == Some(&' ') {
         let mut spans = vec![tok(0, hashes + 1, Kind::Mark)];
-        spans.push(tok(hashes + 1, n, Kind::Heading(hashes as u8)));
+        spans.extend(inline_based(
+            &chars,
+            hashes + 1,
+            n,
+            Kind::Heading(hashes as u8),
+        ));
         return spans;
     }
 
@@ -163,7 +168,7 @@ fn highlight_line(line: &str, idx: usize, state: &mut State, kind: FileKind) -> 
     if chars.get(indent) == Some(&'>') {
         let mut spans = vec![tok(0, indent + 1, Kind::Mark)];
         if indent + 1 < n {
-            spans.push(tok(indent + 1, n, Kind::Quote));
+            spans.extend(inline_based(&chars, indent + 1, n, Kind::Quote));
         }
         return spans;
     }
@@ -217,12 +222,19 @@ fn highlight_line(line: &str, idx: usize, state: &mut State, kind: FileKind) -> 
 /// Inline markdown within `chars[from..to]`: `code`, **bold**, *italic*,
 /// _italic_, [text](url), and inline <html>.
 fn inline(chars: &[char], from: usize, to: usize) -> Vec<SpanTok> {
+    inline_based(chars, from, to, Kind::Text)
+}
+
+/// Like `inline`, but plain (unmarked) text runs get `base` instead of
+/// `Kind::Text` — lets a heading/quote keep its color under inline marks
+/// without stacking kinds on one span.
+fn inline_based(chars: &[char], from: usize, to: usize, base: Kind) -> Vec<SpanTok> {
     let mut spans = Vec::new();
     let mut text_start = from;
     let mut i = from;
     let flush = |spans: &mut Vec<SpanTok>, text_start: usize, upto: usize| {
         if upto > text_start {
-            spans.push(tok(text_start, upto, Kind::Text));
+            spans.push(tok(text_start, upto, base));
         }
     };
     while i < to {
@@ -486,6 +498,22 @@ mod tests {
             kinds(&s[0]),
             vec![Kind::Text, Kind::Bullet, Kind::CheckboxOpen, Kind::Text]
         );
+    }
+
+    #[test]
+    fn heading_with_inline_bold() {
+        let s = hl(&["# **hi**"]);
+        let k = kinds(&s[0]);
+        assert!(k.contains(&Kind::Bold));
+        assert_covers(&s[0], 8);
+    }
+
+    #[test]
+    fn quote_with_inline_bold() {
+        let s = hl(&["> **bold**"]);
+        let k = kinds(&s[0]);
+        assert!(k.contains(&Kind::Bold));
+        assert_covers(&s[0], 10);
     }
 
     #[test]
