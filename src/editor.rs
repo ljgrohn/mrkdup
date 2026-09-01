@@ -1,4 +1,4 @@
-use ratatui_textarea::TextArea;
+use ratatui_textarea::{CursorMove, DataCursor, Input, TextArea};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -20,7 +20,7 @@ pub enum SaveOutcome {
 }
 
 pub struct Editor {
-    pub textarea: TextArea<'static>,
+    textarea: TextArea<'static>,
     pub path: Option<PathBuf>,
     pub dirty: bool,
     mtime: Option<SystemTime>,
@@ -77,6 +77,79 @@ impl Editor {
 
     pub fn mark_dirty(&mut self) {
         self.dirty = true;
+    }
+
+    /// The buffer's lines, one `String` per line (no line terminators).
+    pub fn lines(&self) -> &[String] {
+        self.textarea.lines()
+    }
+
+    /// Cursor position as (row, col), both 0-based.
+    pub fn cursor(&self) -> (usize, usize) {
+        let DataCursor(row, col) = self.textarea.cursor();
+        (row, col)
+    }
+
+    /// The line the cursor is currently on, if any.
+    pub fn current_line(&self) -> Option<&str> {
+        let (row, _) = self.cursor();
+        self.textarea.lines().get(row).map(String::as_str)
+    }
+
+    /// Move the cursor to an exact (row, col) position. `CursorMove::Jump`
+    /// only takes `u16` coordinates, so this is the one place that guards
+    /// against a position beyond `u16::MAX`; returns `false` (leaving the
+    /// cursor untouched) when either coordinate doesn't fit.
+    pub fn set_cursor(&mut self, row: usize, col: usize) -> bool {
+        if row > u16::MAX as usize || col > u16::MAX as usize {
+            return false;
+        }
+        self.textarea
+            .move_cursor(CursorMove::Jump(row as u16, col as u16));
+        true
+    }
+
+    /// Move the cursor with any other `CursorMove` variant (word/paragraph/
+    /// line motions, etc). Positions beyond `u16::MAX` are handled by
+    /// `set_cursor`, not this method.
+    pub fn move_cursor(&mut self, m: CursorMove) {
+        self.textarea.move_cursor(m);
+    }
+
+    pub fn insert_str<S: AsRef<str>>(&mut self, s: S) -> bool {
+        self.textarea.insert_str(s)
+    }
+
+    pub fn undo(&mut self) -> bool {
+        self.textarea.undo()
+    }
+
+    pub fn redo(&mut self) -> bool {
+        self.textarea.redo()
+    }
+
+    pub fn input(&mut self, input: Input) -> bool {
+        self.textarea.input(input)
+    }
+
+    pub fn cancel_selection(&mut self) {
+        self.textarea.cancel_selection();
+    }
+
+    pub fn selection_range(&self) -> Option<((usize, usize), (usize, usize))> {
+        self.textarea.selection_range()
+    }
+
+    /// Delete the character before the cursor. Used by the "--0" checkbox
+    /// expansion to remove the two dashes it was triggered on.
+    pub fn delete_char(&mut self) -> bool {
+        self.textarea.delete_char()
+    }
+
+    /// Delete from the cursor to the end of the current line. Used by
+    /// checkbox toggling to rewrite a line in place.
+    pub fn delete_line_by_end(&mut self) -> bool {
+        self.textarea.delete_line_by_end()
     }
 
     fn content(&self) -> String {

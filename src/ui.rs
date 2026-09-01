@@ -3,7 +3,6 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
-use ratatui_textarea::DataCursor;
 
 use crate::app::{App, Focus, Prompt};
 
@@ -362,12 +361,11 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
                 })
                 .unwrap_or_else(|| "[no file]".into());
             let dirty = if app.editor.dirty { "*" } else { "" };
-            let DataCursor(row, col) = app.editor.textarea.cursor();
+            let (row, col) = app.editor.cursor();
             let mut s = format!("{mode}| {path}{dirty}  {}:{}", row + 1, col + 1);
             if app.editor.path.is_some() {
                 let words: usize = app
                     .editor
-                    .textarea
                     .lines()
                     .iter()
                     .map(|l| l.split_whitespace().count())

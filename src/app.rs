@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui_textarea::{CursorMove, DataCursor, Input};
+use ratatui_textarea::{CursorMove, Input};
 
 use crate::config::Config;
 use crate::editor::{Editor, SaveOutcome};
@@ -335,10 +335,10 @@ impl App {
             // crate defaults make Ctrl+K kill-to-end-of-line; we use
             // Ctrl+J/Ctrl+K as word motions instead
             (true, KeyCode::Char('j')) => {
-                self.editor.textarea.move_cursor(CursorMove::WordForward);
+                self.editor.move_cursor(CursorMove::WordForward);
             }
             (true, KeyCode::Char('k')) => {
-                self.editor.textarea.move_cursor(CursorMove::WordBack);
+                self.editor.move_cursor(CursorMove::WordBack);
             }
             (true, KeyCode::Char('g')) => {
                 if self.last_search.is_empty() {
@@ -351,12 +351,12 @@ impl App {
             // crate defaults are Ctrl+U/Ctrl+R with Ctrl+Y = paste;
             // intercept so the advertised keys work
             (true, KeyCode::Char('z')) => {
-                if self.editor.textarea.undo() {
+                if self.editor.undo() {
                     self.note_edit();
                 }
             }
             (true, KeyCode::Char('y')) => {
-                if self.editor.textarea.redo() {
+                if self.editor.redo() {
                     self.note_edit();
                 }
             }
@@ -379,7 +379,7 @@ impl App {
                 } else {
                     CursorMove::ParagraphBack
                 };
-                self.editor.textarea.move_cursor(mv);
+                self.editor.move_cursor(mv);
             }
             // typing "--0" expands to a markdown checkbox "- [ ] "
             (false, KeyCode::Char('0'))
@@ -388,13 +388,13 @@ impl App {
                     .intersects(KeyModifiers::ALT | KeyModifiers::SUPER)
                     && self.checkbox_trigger_armed() =>
             {
-                self.editor.textarea.delete_char(); // the two dashes
-                self.editor.textarea.delete_char();
-                self.editor.textarea.insert_str("- [ ] ");
+                self.editor.delete_char(); // the two dashes
+                self.editor.delete_char();
+                self.editor.insert_str("- [ ] ");
                 self.note_edit();
             }
             _ => {
-                if self.editor.textarea.input(Input::from(key)) {
+                if self.editor.input(Input::from(key)) {
                     self.note_edit();
                 }
             }
@@ -409,34 +409,30 @@ impl App {
     fn toggle_checkbox(&mut self) {
         // an active selection would make the moves below extend it and
         // delete_line_by_end would then eat the whole selection
-        self.editor.textarea.cancel_selection();
-        let DataCursor(row, col) = self.editor.textarea.cursor();
-        let Some(old) = self.editor.textarea.lines().get(row).cloned() else {
+        self.editor.cancel_selection();
+        let (row, col) = self.editor.cursor();
+        let Some(old) = self.editor.current_line().map(str::to_string) else {
             return;
         };
         let new = crate::checkbox::toggle_checkbox_line(&old);
         // Head, not Jump(row as u16, _): u16 would truncate past line 65535
-        self.editor.textarea.move_cursor(CursorMove::Head);
+        self.editor.move_cursor(CursorMove::Head);
         if !old.is_empty() {
             // an empty line would delete the newline instead — skip
-            self.editor.textarea.delete_line_by_end();
+            self.editor.delete_line_by_end();
         }
-        self.editor.textarea.insert_str(&new);
+        self.editor.insert_str(&new);
         let delta = new.chars().count() - old.chars().count();
         let new_col = (col + delta).min(new.chars().count());
-        if row <= u16::MAX as usize && new_col <= u16::MAX as usize {
-            self.editor
-                .textarea
-                .move_cursor(CursorMove::Jump(row as u16, new_col as u16));
-        }
+        self.editor.set_cursor(row, new_col);
         self.note_edit();
     }
 
     /// True when the two chars before the cursor are exactly "--"
     /// (not part of a longer dash run).
     fn checkbox_trigger_armed(&self) -> bool {
-        let DataCursor(row, col) = self.editor.textarea.cursor();
-        let Some(line) = self.editor.textarea.lines().get(row) else {
+        let (_, col) = self.editor.cursor();
+        let Some(line) = self.editor.current_line() else {
             return false;
         };
         crate::checkbox::trigger_armed(line, col)
@@ -634,20 +630,17 @@ impl App {
         }
         // the renderer highlights every (case-insensitive) match of this
         self.search_highlight = Some(query.to_string());
-        let DataCursor(crow, ccol) = self.editor.textarea.cursor();
-        let lines: Vec<String> = self.editor.textarea.lines().to_vec();
+        let (crow, ccol) = self.editor.cursor();
+        let lines: Vec<String> = self.editor.lines().to_vec();
         self.last_search = query.to_string();
         match crate::search::next(&lines, (crow, ccol), query) {
             Some((row, cpos)) => {
-                if row > u16::MAX as usize || cpos > u16::MAX as usize {
-                    // Jump takes u16; truncating would land on the wrong line
+                // set_cursor guards the u16::MAX bound that Jump takes
+                if !self.editor.set_cursor(row, cpos) {
                     self.status = Some("match is beyond line 65535 — cannot jump".into());
                     return;
                 }
-                self.editor.textarea.cancel_selection();
-                self.editor
-                    .textarea
-                    .move_cursor(CursorMove::Jump(row as u16, cpos as u16));
+                self.editor.cancel_selection();
             }
             None => {
                 self.status = Some(format!("not found: {query}"));
@@ -689,7 +682,7 @@ mod tests {
         let mut app = App::new(fixture("open"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // a.md selected first
         assert!(matches!(app.focus, Focus::Editor));
-        assert_eq!(app.editor.textarea.lines(), ["hello", "world"]);
+        assert_eq!(app.editor.lines(), ["hello", "world"]);
     }
 
     #[test]
@@ -714,7 +707,7 @@ mod tests {
             fs::read_to_string(root.join("a.md")).unwrap(),
             "Xhello\nworld\n"
         );
-        assert_eq!(app.editor.textarea.lines(), ["bee"]);
+        assert_eq!(app.editor.lines(), ["bee"]);
     }
 
     #[test]
@@ -722,11 +715,11 @@ mod tests {
         let mut app = App::new(fixture("undo"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(key(KeyCode::Char('X')));
-        assert_eq!(app.editor.textarea.lines()[0], "Xhello");
+        assert_eq!(app.editor.lines()[0], "Xhello");
         app.handle_key(ctrl('z'));
-        assert_eq!(app.editor.textarea.lines()[0], "hello");
+        assert_eq!(app.editor.lines()[0], "hello");
         app.handle_key(ctrl('y'));
-        assert_eq!(app.editor.textarea.lines()[0], "Xhello");
+        assert_eq!(app.editor.lines()[0], "Xhello");
     }
 
     #[test]
@@ -799,7 +792,7 @@ mod tests {
             app.handle_key(key(KeyCode::Char(c)));
         }
         app.handle_key(key(KeyCode::Enter));
-        assert_eq!(app.editor.textarea.cursor(), (1, 0));
+        assert_eq!(app.editor.cursor(), (1, 0));
     }
 
     #[test]
@@ -809,10 +802,10 @@ mod tests {
         app.handle_key(ctrl('f'));
         app.handle_key(key(KeyCode::Char('l')));
         app.handle_key(key(KeyCode::Enter));
-        assert_eq!(app.editor.textarea.cursor(), (0, 2));
+        assert_eq!(app.editor.cursor(), (0, 2));
         app.handle_key(ctrl('f'));
         app.handle_key(key(KeyCode::Enter)); // empty -> repeat "l"
-        assert_eq!(app.editor.textarea.cursor(), (0, 3));
+        assert_eq!(app.editor.cursor(), (0, 3));
     }
 
     #[test]
@@ -822,11 +815,11 @@ mod tests {
         app.handle_key(ctrl('f'));
         app.handle_key(key(KeyCode::Char('l')));
         app.handle_key(key(KeyCode::Enter));
-        assert_eq!(app.editor.textarea.cursor(), (0, 2));
+        assert_eq!(app.editor.cursor(), (0, 2));
         app.handle_key(ctrl('g'));
-        assert_eq!(app.editor.textarea.cursor(), (0, 3));
+        assert_eq!(app.editor.cursor(), (0, 3));
         app.handle_key(ctrl('g'));
-        assert_eq!(app.editor.textarea.cursor(), (1, 3)); // "world"
+        assert_eq!(app.editor.cursor(), (1, 3)); // "world"
     }
 
     #[test]
@@ -834,7 +827,7 @@ mod tests {
         let mut app = App::new(fixture("next-none"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('g'));
-        assert_eq!(app.editor.textarea.cursor(), (0, 0)); // didn't move
+        assert_eq!(app.editor.cursor(), (0, 0)); // didn't move
         assert!(app.status.as_deref().is_some_and(|s| s.contains("search")));
     }
 
@@ -875,7 +868,7 @@ mod tests {
             app.handle_key(key(KeyCode::Char(c)));
         }
         app.handle_key(key(KeyCode::Enter));
-        assert_eq!(app.editor.textarea.cursor(), (0, 6));
+        assert_eq!(app.editor.cursor(), (0, 6));
         // and the renderer's matcher is literal too: "axb" is no match
         assert_eq!(find_ci("price axb here", "(a.b)", 0), None);
     }
@@ -901,7 +894,7 @@ mod tests {
         app.handle_key(key(KeyCode::Enter)); // hello / world, cursor (0,0)
         app.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT));
         app.handle_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
-        assert_eq!(app.editor.textarea.lines()[0], "JKhello"); // typed, not moved
+        assert_eq!(app.editor.lines()[0], "JKhello"); // typed, not moved
     }
 
     #[test]
@@ -911,10 +904,10 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::ALT));
-        let DataCursor(row, _) = app.editor.textarea.cursor();
+        let (row, _) = app.editor.cursor();
         assert!(row >= 1); // moved past the blank line
         app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::ALT));
-        assert_eq!(app.editor.textarea.cursor(), (0, 0));
+        assert_eq!(app.editor.cursor(), (0, 0));
     }
 
     #[test]
@@ -922,9 +915,9 @@ mod tests {
         let mut app = App::new(fixture("linejump"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // hello
         app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::SUPER));
-        assert_eq!(app.editor.textarea.cursor(), (0, 5)); // end of "hello"
+        assert_eq!(app.editor.cursor(), (0, 5)); // end of "hello"
         app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::SUPER));
-        assert_eq!(app.editor.textarea.cursor(), (0, 0));
+        assert_eq!(app.editor.cursor(), (0, 0));
     }
 
     #[test]
@@ -934,8 +927,8 @@ mod tests {
         app.handle_key(key(KeyCode::Char('-')));
         app.handle_key(key(KeyCode::Char('-')));
         app.handle_key(key(KeyCode::Char('0')));
-        assert_eq!(app.editor.textarea.lines()[0], "- [ ] hello");
-        assert_eq!(app.editor.textarea.cursor(), (0, 6)); // ready to type the item
+        assert_eq!(app.editor.lines()[0], "- [ ] hello");
+        assert_eq!(app.editor.cursor(), (0, 6)); // ready to type the item
         assert!(app.editor.dirty);
     }
 
@@ -944,7 +937,7 @@ mod tests {
         let mut app = App::new(fixture("zero"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(key(KeyCode::Char('0')));
-        assert_eq!(app.editor.textarea.lines()[0], "0hello");
+        assert_eq!(app.editor.lines()[0], "0hello");
     }
 
     #[test]
@@ -954,7 +947,7 @@ mod tests {
         for c in "---0".chars() {
             app.handle_key(key(KeyCode::Char(c)));
         }
-        assert_eq!(app.editor.textarea.lines()[0], "---0hello");
+        assert_eq!(app.editor.lines()[0], "---0hello");
     }
 
     #[test]
@@ -975,7 +968,7 @@ mod tests {
         app.handle_key(key(KeyCode::Enter)); // open a.md ("hello"...)
         app.handle_key(key(KeyCode::Char('q')));
         app.handle_key(key(KeyCode::Char('p')));
-        assert_eq!(app.editor.textarea.lines()[0], "qphello");
+        assert_eq!(app.editor.lines()[0], "qphello");
         assert!(!app.should_quit);
     }
 
@@ -992,10 +985,10 @@ mod tests {
             app.handle_key(key(KeyCode::Char(c)));
         }
         app.handle_key(key(KeyCode::Enter));
-        assert_eq!(app.editor.textarea.cursor(), (1, 7));
+        assert_eq!(app.editor.cursor(), (1, 7));
         // ...and Ctrl+G wraps around to the capitalized one
         app.handle_key(ctrl('g'));
-        assert_eq!(app.editor.textarea.cursor(), (0, 0));
+        assert_eq!(app.editor.cursor(), (0, 0));
     }
 
     #[test]
@@ -1005,15 +998,15 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('j'));
-        let DataCursor(_, col1) = app.editor.textarea.cursor();
+        let (_, col1) = app.editor.cursor();
         assert!(col1 > 0); // advanced
         app.handle_key(ctrl('j'));
-        let DataCursor(_, col2) = app.editor.textarea.cursor();
+        let (_, col2) = app.editor.cursor();
         assert!(col2 > col1);
         app.handle_key(ctrl('k'));
-        assert_eq!(app.editor.textarea.cursor(), (0, col1));
+        assert_eq!(app.editor.cursor(), (0, col1));
         // nothing was deleted (Ctrl+K used to be kill-to-end-of-line)
-        assert_eq!(app.editor.textarea.lines()[0], "alpha bravo charlie");
+        assert_eq!(app.editor.lines()[0], "alpha bravo charlie");
         assert!(!app.editor.dirty);
     }
 
@@ -1024,8 +1017,8 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('d'));
-        assert_eq!(app.editor.textarea.lines()[0], "- [x] milk");
-        assert_eq!(app.editor.textarea.cursor(), (0, 0)); // same width: cursor stays
+        assert_eq!(app.editor.lines()[0], "- [x] milk");
+        assert_eq!(app.editor.cursor(), (0, 0)); // same width: cursor stays
         assert!(app.editor.dirty);
     }
 
@@ -1036,7 +1029,7 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('d'));
-        assert_eq!(app.editor.textarea.lines()[0], "- [ ] milk");
+        assert_eq!(app.editor.lines()[0], "- [ ] milk");
     }
 
     #[test]
@@ -1046,7 +1039,7 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('d'));
-        assert_eq!(app.editor.textarea.lines()[0], "- [ ] milk");
+        assert_eq!(app.editor.lines()[0], "- [ ] milk");
     }
 
     #[test]
@@ -1059,10 +1052,7 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT));
         app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT));
         app.handle_key(ctrl('d'));
-        assert_eq!(
-            app.editor.textarea.lines(),
-            ["alpha", "bravo", "- [ ] charlie"]
-        );
+        assert_eq!(app.editor.lines(), ["alpha", "bravo", "- [ ] charlie"]);
     }
 
     #[test]
@@ -1071,7 +1061,7 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(ctrl('b')); // hide tree -> editor focus, no file
         app.handle_key(key(KeyCode::Char('x')));
-        assert_eq!(app.editor.textarea.lines(), [""]); // nothing typed
+        assert_eq!(app.editor.lines(), [""]); // nothing typed
         assert!(!app.editor.dirty);
         assert!(app.status.is_some()); // told the user why
         app.handle_key(key(KeyCode::Esc));
@@ -1085,7 +1075,7 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('d'));
-        assert_eq!(app.editor.textarea.lines()[0], "- [ ] milk");
+        assert_eq!(app.editor.lines()[0], "- [ ] milk");
     }
 
     #[test]
@@ -1094,8 +1084,8 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // "hello", cursor (0,0)
         app.handle_key(ctrl('d'));
-        assert_eq!(app.editor.textarea.lines()[0], "- [ ] hello");
-        assert_eq!(app.editor.textarea.cursor(), (0, 6)); // still on the 'h'
+        assert_eq!(app.editor.lines()[0], "- [ ] hello");
+        assert_eq!(app.editor.cursor(), (0, 6)); // still on the 'h'
     }
 
     #[test]
@@ -1105,10 +1095,10 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('d'));
-        assert_eq!(app.editor.textarea.lines()[0], "  - [x] a");
+        assert_eq!(app.editor.lines()[0], "  - [x] a");
         app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         app.handle_key(ctrl('d'));
-        assert_eq!(app.editor.textarea.lines()[1], "    - [ ] plain");
+        assert_eq!(app.editor.lines()[1], "    - [ ] plain");
     }
 
     #[test]
@@ -1118,7 +1108,7 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('d'));
-        assert_eq!(app.editor.textarea.lines(), ["- [ ] ", "world"]);
+        assert_eq!(app.editor.lines(), ["- [ ] ", "world"]);
     }
 
     #[test]
@@ -1127,11 +1117,11 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // "hello"
         app.handle_key(ctrl('d'));
-        assert_eq!(app.editor.textarea.lines()[0], "- [ ] hello");
+        assert_eq!(app.editor.lines()[0], "- [ ] hello");
         // the toggle is a delete + an insert, so two undo steps
         app.handle_key(ctrl('z'));
         app.handle_key(ctrl('z'));
-        assert_eq!(app.editor.textarea.lines()[0], "hello");
+        assert_eq!(app.editor.lines()[0], "hello");
     }
 
     #[test]
@@ -1140,7 +1130,7 @@ mod tests {
         app.handle_key(key(KeyCode::Enter)); // open a.md
         app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
         assert!(matches!(app.focus, Focus::Tree));
-        assert_eq!(app.editor.textarea.lines(), ["hello", "world"]); // unchanged
+        assert_eq!(app.editor.lines(), ["hello", "world"]); // unchanged
         assert!(!app.editor.dirty);
     }
 
@@ -1209,7 +1199,7 @@ mod tests {
         app.handle_key(key(KeyCode::Char('k'))); // k also toggles to Yes
         app.handle_key(key(KeyCode::Enter));
         assert!(app.editor.path.is_none());
-        assert_eq!(app.editor.textarea.lines(), [""]);
+        assert_eq!(app.editor.lines(), [""]);
     }
 
     #[test]
@@ -1490,7 +1480,7 @@ mod tests {
             fs::read_to_string(root.join("a.md")).unwrap(),
             "Xhello\nworld\n"
         );
-        assert_eq!(app.editor.textarea.lines(), ["bee"]);
+        assert_eq!(app.editor.lines(), ["bee"]);
     }
 
     #[test]

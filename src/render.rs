@@ -8,7 +8,6 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
-use ratatui_textarea::DataCursor;
 
 use crate::app::App;
 use crate::search::find_ci;
@@ -20,9 +19,9 @@ pub fn render_editor(f: &mut Frame, app: &mut App, inner: Rect, focused: bool) {
     if width == 0 || height == 0 {
         return;
     }
-    let lines: Vec<String> = app.editor.textarea.lines().to_vec();
+    let lines: Vec<String> = app.editor.lines().to_vec();
     let rows = wrap::layout(&lines, width);
-    let DataCursor(crow, ccol) = app.editor.textarea.cursor();
+    let (crow, ccol) = app.editor.cursor();
     let (cvrow, cx) = wrap::cursor_position(&rows, &lines, (crow, ccol));
     app.editor_scroll = wrap::scroll_top(
         app.editor_scroll.min(rows.len().saturating_sub(1)),
@@ -32,7 +31,7 @@ pub fn render_editor(f: &mut Frame, app: &mut App, inner: Rect, focused: bool) {
 
     let kind = highlight::file_kind(app.editor.path.as_deref());
     let spans = highlight::highlight(&lines, kind);
-    let selection = app.editor.textarea.selection_range();
+    let selection = app.editor.selection_range();
     let search: Option<(String, usize)> = app
         .search_highlight
         .as_ref()
