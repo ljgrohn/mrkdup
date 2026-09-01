@@ -158,3 +158,295 @@ fn mono_theme_reverses_selection_status_and_search() {
     assert_eq!(theme.tree_open, reversed);
     assert_eq!(theme.search_match, reversed);
 }
+
+// ---------------------------------------------------------------------
+// parse_style: the color-value grammar table from the plan.
+// ---------------------------------------------------------------------
+
+#[test]
+fn parse_style_grammar_table() {
+    assert_eq!(
+        parse_style("cyan").unwrap(),
+        Style::default().fg(Color::Cyan)
+    );
+    assert_eq!(
+        parse_style("cyan+bold").unwrap(),
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    );
+    assert_eq!(
+        parse_style("black on yellow").unwrap(),
+        Style::default().fg(Color::Black).bg(Color::Yellow)
+    );
+    assert_eq!(
+        parse_style("white on blue").unwrap(),
+        Style::default().fg(Color::White).bg(Color::Blue)
+    );
+    assert_eq!(
+        parse_style("dim").unwrap(),
+        Style::default().add_modifier(Modifier::DIM)
+    );
+    assert_eq!(
+        parse_style("reverse").unwrap(),
+        Style::default().add_modifier(Modifier::REVERSED)
+    );
+    assert_eq!(
+        parse_style("reversed").unwrap(),
+        Style::default().add_modifier(Modifier::REVERSED)
+    );
+    assert_eq!(
+        parse_style("#89b4fa").unwrap(),
+        Style::default().fg(Color::Rgb(0x89, 0xb4, 0xfa))
+    );
+    assert_eq!(
+        parse_style("#cdd6f4 on #1e1e2e").unwrap(),
+        Style::default()
+            .fg(Color::Rgb(0xcd, 0xd6, 0xf4))
+            .bg(Color::Rgb(0x1e, 0x1e, 0x2e))
+    );
+    assert_eq!(parse_style("default").unwrap(), Style::default());
+}
+
+#[test]
+fn parse_style_default_on_a_side_is_color_reset() {
+    assert_eq!(
+        parse_style("default on blue").unwrap(),
+        Style::default().fg(Color::Reset).bg(Color::Blue)
+    );
+}
+
+#[test]
+fn parse_style_is_case_insensitive() {
+    assert_eq!(
+        parse_style("CYAN").unwrap(),
+        Style::default().fg(Color::Cyan)
+    );
+    assert_eq!(
+        parse_style("Cyan+Bold").unwrap(),
+        parse_style("cyan+bold").unwrap()
+    );
+    assert_eq!(
+        parse_style("#89B4FA").unwrap(),
+        parse_style("#89b4fa").unwrap()
+    );
+    assert_eq!(parse_style("DEFAULT").unwrap(), Style::default());
+    assert_eq!(
+        parse_style("Black on Yellow").unwrap(),
+        parse_style("black on yellow").unwrap()
+    );
+}
+
+#[test]
+fn parse_style_gray_and_grey_are_color_gray() {
+    assert_eq!(
+        parse_style("gray").unwrap(),
+        Style::default().fg(Color::Gray)
+    );
+    assert_eq!(
+        parse_style("grey").unwrap(),
+        Style::default().fg(Color::Gray)
+    );
+}
+
+#[test]
+fn parse_style_bright_prefix_maps_to_light_variant() {
+    assert_eq!(
+        parse_style("bright-cyan").unwrap(),
+        Style::default().fg(Color::LightCyan)
+    );
+    assert_eq!(
+        parse_style("bright-red").unwrap(),
+        Style::default().fg(Color::LightRed)
+    );
+}
+
+#[test]
+fn parse_style_two_colors_on_one_side_without_on_is_a_warning() {
+    assert!(parse_style("red+blue").is_err());
+}
+
+#[test]
+fn parse_style_hex_must_be_exactly_six_digits() {
+    assert!(parse_style("#fff").is_err());
+    assert!(parse_style("#ffffff").is_ok());
+    assert!(parse_style("#fffffff").is_err());
+}
+
+#[test]
+fn parse_style_invalid_hex_digits_is_a_warning() {
+    assert!(parse_style("#gg0000").is_err());
+}
+
+#[test]
+fn parse_style_no_color_indexed_escape_hatch() {
+    // "196" is not a recognized color token at all (no bare numbers).
+    assert!(parse_style("196").is_err());
+}
+
+#[test]
+fn parse_style_spaces_around_plus_is_a_warning() {
+    assert!(parse_style("cyan + bold").is_err());
+}
+
+#[test]
+fn parse_style_unknown_token_is_a_warning() {
+    assert!(parse_style("chartreuse").is_err());
+}
+
+// ---------------------------------------------------------------------
+// parse_overlay: pure, no filesystem.
+// ---------------------------------------------------------------------
+
+#[test]
+fn parse_overlay_sets_only_the_named_slot() {
+    let mut theme = Theme::default();
+    let warnings = parse_overlay("heading1 = red+bold", &mut theme);
+    assert!(warnings.is_empty());
+    assert_eq!(
+        theme.heading1,
+        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+    );
+    // everything else stays at the default theme's values
+    let expected = Theme {
+        heading1: theme.heading1,
+        ..Theme::default()
+    };
+    assert_eq!(theme, expected);
+}
+
+#[test]
+fn parse_overlay_search_match_round_trips() {
+    let mut theme = Theme::default();
+    let before = theme.search_match;
+    let warnings = parse_overlay("search_match = black on yellow", &mut theme);
+    assert!(warnings.is_empty());
+    assert_eq!(theme.search_match, before);
+}
+
+#[test]
+fn parse_overlay_unknown_key_warns_and_leaves_theme_unchanged() {
+    let mut theme = Theme::default();
+    let before = theme.clone();
+    let warnings = parse_overlay("nope = cyan", &mut theme);
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(theme, before);
+}
+
+#[test]
+fn parse_overlay_spaces_around_plus_warns() {
+    let mut theme = Theme::default();
+    let before = theme.clone();
+    let warnings = parse_overlay("heading1 = cyan + bold", &mut theme);
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(theme, before);
+}
+
+#[test]
+fn parse_overlay_bad_hex_warns() {
+    let mut theme = Theme::default();
+    let before = theme.clone();
+    let warnings = parse_overlay("heading1 = #gg0000", &mut theme);
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(theme, before);
+}
+
+#[test]
+fn parse_overlay_hex_sets_rgb_fg() {
+    let mut theme = Theme::default();
+    let warnings = parse_overlay("quote = #cc0000", &mut theme);
+    assert!(warnings.is_empty());
+    assert_eq!(
+        theme.quote,
+        Style::default().fg(Color::Rgb(0xcc, 0x00, 0x00))
+    );
+}
+
+#[test]
+fn parse_overlay_name_is_not_settable() {
+    let mut theme = Theme::default();
+    let before = theme.clone();
+    let warnings = parse_overlay("name = evil", &mut theme);
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(theme, before);
+}
+
+#[test]
+fn parse_overlay_bad_lines_warn_and_the_rest_still_apply() {
+    let mut theme = Theme::default();
+    let warnings = parse_overlay("nope = cyan\nquote = red\n", &mut theme);
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(theme.quote, Style::default().fg(Color::Red));
+}
+
+#[test]
+fn parse_overlay_comments_and_blank_lines_are_skipped() {
+    let mut theme = Theme::default();
+    let warnings = parse_overlay("# a comment\n\n   \nquote = red\n", &mut theme);
+    assert!(warnings.is_empty());
+    assert_eq!(theme.quote, Style::default().fg(Color::Red));
+}
+
+// ---------------------------------------------------------------------
+// load_from: filesystem, explicit dir (no env var).
+// ---------------------------------------------------------------------
+
+fn load_fixture(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("mrkdup-theme-load-{tag}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("themes")).unwrap();
+    std::fs::write(dir.join("theme"), "quote = red\n").unwrap();
+    std::fs::write(dir.join("themes/forest"), "heading1 = green+bold\n").unwrap();
+    dir
+}
+
+#[test]
+fn load_from_default_applies_the_overlay_file() {
+    let dir = load_fixture("default");
+    let (theme, warnings) = load_from("default", &dir);
+    assert!(warnings.is_empty());
+    let expected = Theme {
+        quote: Style::default().fg(Color::Red),
+        ..Theme::default()
+    };
+    assert_eq!(theme, expected);
+}
+
+#[test]
+fn load_from_light_applies_the_overlay_file_on_top_of_light() {
+    let dir = load_fixture("light");
+    let (theme, warnings) = load_from("light", &dir);
+    assert!(warnings.is_empty());
+    let expected = Theme {
+        quote: Style::default().fg(Color::Red),
+        ..Theme::light()
+    };
+    assert_eq!(theme, expected);
+}
+
+#[test]
+fn load_from_named_file_then_overlay_file() {
+    let dir = load_fixture("forest");
+    let (theme, warnings) = load_from("forest", &dir);
+    assert!(warnings.is_empty());
+    let expected = Theme {
+        heading1: Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD),
+        quote: Style::default().fg(Color::Red),
+        ..Theme::default()
+    };
+    assert_eq!(theme, expected);
+}
+
+#[test]
+fn load_from_missing_named_file_warns_once_and_falls_back_to_default() {
+    let dir = load_fixture("missing");
+    let (theme, warnings) = load_from("missing", &dir);
+    assert_eq!(warnings.len(), 1);
+    let expected = Theme {
+        quote: Style::default().fg(Color::Red),
+        ..Theme::default()
+    };
+    assert_eq!(theme, expected);
+}

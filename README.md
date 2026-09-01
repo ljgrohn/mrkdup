@@ -98,7 +98,69 @@ theme = default    # default | light | mono
 | `top_margin_percent` | 3 | 0–40 | editor breathing room: % of pane height trimmed off the top |
 | `autosave_seconds` | 2 | 1–600 | idle seconds before a dirty buffer autosaves |
 | `tree_refresh_seconds` | 2 | 1–600 | seconds between automatic tree refreshes |
-| `theme` | `default` | `default` \| `light` \| `mono` | `default` (current look), `light` (dark fg for light terminals), `mono` (no color, modifiers only) |
+| `theme` | `default` | see below | `default` (current look), `light` (dark fg for light terminals), `mono` (no color, modifiers only), or any other name — see Themes |
+
+### Themes
+
+`theme` picks one of the three builtins (`default`, `light`, `mono`) by
+name. Any other name (matching `^[a-z][a-z0-9_-]{0,31}$`) is looked up as
+a file at `$XDG_CONFIG_HOME/mrkdup/themes/<name>` — an unknown name or a
+missing file falls back to `default` with a warning in the status bar.
+
+On top of whichever theme that resolves to, mrkdup applies
+`$XDG_CONFIG_HOME/mrkdup/theme` if it exists — an overlay file that
+tweaks individual slots without redefining the whole palette. Both
+files use the same `key = value` format as the config file (`#`
+comments, blank lines, never fails — bad lines warn and are skipped,
+the rest still apply), and both are read once at startup; there's no
+live reload or in-app theme switcher.
+
+Each `value` is one or more colors and modifiers:
+
+```text
+style  := part ( '+' part )* [ ' on ' part ( '+' part )* ]
+part   := color | modifier
+color  := named | bright-named | '#rrggbb' | 'default'
+named  := black | red | green | yellow | blue | magenta | cyan
+         | white | gray | grey
+modifier := reverse | reversed | dim | bold | italic
+           | underline | underlined
+```
+
+The first color on a side is the foreground; `on` starts the
+background. `bright-cyan` is ratatui's `LightCyan`; `gray`/`grey` is
+`Color::Gray`. Hex colors need exactly 6 digits (`#fff` is a warning,
+not CSS-style expansion) and work on truecolor terminals. `default`
+alone is `Style::default()`; `default` combined with other parts
+(`default on blue`) means "reset that side to the terminal's own
+color." Tokens are case-insensitive; there are no spaces except
+around `on` (`cyan + bold` is a warning, not `cyan+bold` with padding).
+
+The settable keys are the `Theme` struct's field names — every pane
+and syntax slot mrkdup paints:
+
+`border_focused`, `border_unfocused`, `popup_border`, `status_bar`,
+`selection`, `prompt_cursor`, `welcome`, `tree_open`, `text`, `mark`,
+`heading1`, `heading2`, `heading`, `bold`, `italic`, `code`,
+`checkbox`, `done`, `quote`, `link`, `bullet`, `html_tag`,
+`html_attr`, `search_match`.
+
+`name` is not settable from a theme file — it's how the theme is
+addressed, not part of it.
+
+A dark truecolor overlay, saved to `~/.config/mrkdup/theme`:
+
+```ini
+# ~/.config/mrkdup/theme
+text = #cdd6f4
+heading1 = #89b4fa+bold
+heading2 = #89b4fa
+quote = #a6e3a1
+code = #94e2d5
+link = #89b4fa+underline
+selection = reverse
+search_match = #1e1e2e on #f9e2af
+```
 
 Keybindings are not remappable.
 

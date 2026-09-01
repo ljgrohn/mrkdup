@@ -2,6 +2,13 @@
 //! scattered across `highlight.rs`, `render.rs`, and `ui.rs` lives here,
 //! in one struct. `Theme::default()` is pixel-identical to the old
 //! hardcoded look — this module is purely a composability refactor.
+//!
+//! Users can override slots at startup via an overlay file
+//! (`$XDG_CONFIG_HOME/mrkdup/theme`) and/or a named full theme file
+//! (`$XDG_CONFIG_HOME/mrkdup/themes/<name>`) — see `load` and
+//! `parse_overlay`.
+
+use std::path::Path;
 
 use ratatui::style::{Color, Modifier, Style};
 
@@ -147,7 +154,7 @@ impl Theme {
     }
 
     /// The builtin named `name`, or `Theme::default()` if `name` isn't
-    /// one of the builtins. File-based lookup is a later task.
+    /// one of the builtins.
     pub fn named(name: &str) -> Theme {
         match name {
             "light" => Theme::light(),
@@ -175,6 +182,272 @@ impl Theme {
             Kind::HtmlTag => self.html_tag,
             Kind::HtmlAttr | Kind::FmKey => self.html_attr,
         }
+    }
+}
+
+/// `default`, `light`, `mono` — the three shipped palettes. Anything
+/// else is a candidate for `themes/<name>` on disk.
+fn is_builtin(name: &str) -> bool {
+    matches!(name, "default" | "light" | "mono")
+}
+
+/// One color-value token: a named color, `bright-<named>`, `#rrggbb`,
+/// or `default` (== `Color::Reset` when used as one part among others;
+/// the whole-value `default` special case is handled by `parse_style`).
+/// `token` has already been lowercased; a token that ends up with
+/// leftover whitespace (from `cyan + bold`-style spacing around `+`)
+/// simply matches nothing here and is reported as unknown by the caller.
+fn parse_color_token(token: &str) -> Option<Color> {
+    if token == "default" {
+        return Some(Color::Reset);
+    }
+    if let Some(hex) = token.strip_prefix('#') {
+        return parse_hex(hex);
+    }
+    if let Some(name) = token.strip_prefix("bright-") {
+        return bright_named_color(name);
+    }
+    named_color(token)
+}
+
+fn named_color(name: &str) -> Option<Color> {
+    match name {
+        "black" => Some(Color::Black),
+        "red" => Some(Color::Red),
+        "green" => Some(Color::Green),
+        "yellow" => Some(Color::Yellow),
+        "blue" => Some(Color::Blue),
+        "magenta" => Some(Color::Magenta),
+        "cyan" => Some(Color::Cyan),
+        "white" => Some(Color::White),
+        "gray" | "grey" => Some(Color::Gray),
+        _ => None,
+    }
+}
+
+/// `bright-<named>` maps to ratatui's `Light*` variants where one
+/// exists. `bright-black` is ratatui's `DarkGray` (its own doc comment
+/// calls that "bright black"). There's no `LightWhite`/`LightGray` in
+/// ratatui, so `bright-white`/`bright-gray`/`bright-grey` are unknown
+/// tokens (a warning), not silently downgraded to plain white/gray.
+fn bright_named_color(name: &str) -> Option<Color> {
+    match name {
+        "black" => Some(Color::DarkGray),
+        "red" => Some(Color::LightRed),
+        "green" => Some(Color::LightGreen),
+        "yellow" => Some(Color::LightYellow),
+        "blue" => Some(Color::LightBlue),
+        "magenta" => Some(Color::LightMagenta),
+        "cyan" => Some(Color::LightCyan),
+        _ => None,
+    }
+}
+
+/// Exactly 6 hex digits, case-insensitive (`token` is already
+/// lowercased by the caller). No `#rgb` shorthand expansion.
+fn parse_hex(hex: &str) -> Option<Color> {
+    if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    Some(Color::Rgb(r, g, b))
+}
+
+fn parse_modifier(token: &str) -> Option<Modifier> {
+    match token {
+        "reverse" | "reversed" => Some(Modifier::REVERSED),
+        "dim" => Some(Modifier::DIM),
+        "bold" => Some(Modifier::BOLD),
+        "italic" => Some(Modifier::ITALIC),
+        "underline" | "underlined" => Some(Modifier::UNDERLINED),
+        _ => None,
+    }
+}
+
+/// One side of a `style` value (the fg side, or the bg side after
+/// `on`): `part ( '+' part )*`, each part a color or a modifier, at
+/// most one color per side.
+fn parse_side(side: &str, is_fg: bool) -> Result<Style, String> {
+    let mut style = Style::default();
+    let mut color_set = false;
+    for token in side.split('+') {
+        let lower = token.to_ascii_lowercase();
+        if let Some(color) = parse_color_token(&lower) {
+            if color_set {
+                return Err(format!("two colors on one side: {side:?}"));
+            }
+            style = if is_fg {
+                style.fg(color)
+            } else {
+                style.bg(color)
+            };
+            color_set = true;
+        } else if let Some(modifier) = parse_modifier(&lower) {
+            style = style.add_modifier(modifier);
+        } else {
+            return Err(format!("unknown token: {token:?}"));
+        }
+    }
+    Ok(style)
+}
+
+/// Parse one `style` value per the color-value grammar:
+///
+/// ```text
+/// style  := part ( '+' part )* [ ' on ' part ( '+' part )* ]
+/// part   := color | modifier
+/// color  := named | bright-named | '#' hex6 | 'default'
+/// named  := black | red | green | yellow | blue | magenta | cyan
+///         | white | gray | grey
+/// modifier := reverse | reversed | dim | bold | italic
+///           | underline | underlined
+/// ```
+///
+/// The whole value being exactly `default` (case-insensitive) is
+/// `Style::default()`; `default` as one part among others is
+/// `Color::Reset` on that side. No spaces except around the literal
+/// `on` — `cyan + bold` is a warning, not `cyan+bold` with padding.
+pub fn parse_style(value: &str) -> Result<Style, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err("empty value".to_string());
+    }
+    if value.eq_ignore_ascii_case("default") {
+        return Ok(Style::default());
+    }
+    match value.split_once(" on ") {
+        Some((fg, bg)) => {
+            if fg.is_empty() || bg.is_empty() {
+                return Err(format!("empty side in {value:?}"));
+            }
+            let fg_style = parse_side(fg, true)?;
+            let bg_style = parse_side(bg, false)?;
+            Ok(fg_style.patch(bg_style))
+        }
+        None => parse_side(value, true),
+    }
+}
+
+/// Apply an overlay file's `key = value` lines onto `theme` in place.
+/// Same never-fail contract as `config::parse`: bad lines (unknown
+/// key, unparsable value) are skipped with a warning; the rest still
+/// apply. `name` is not a settable slot — it identifies the theme, it
+/// isn't part of it.
+pub fn parse_overlay(text: &str, theme: &mut Theme) -> Vec<String> {
+    let mut warnings = Vec::new();
+    for (i, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let n = i + 1;
+        let Some((key, value)) = line.split_once('=') else {
+            warnings.push(format!("line {n}: expected `key = value`"));
+            continue;
+        };
+        let (key, value) = (key.trim(), value.trim());
+        if key == "name" {
+            warnings.push(format!("line {n}: name is not settable from a theme file"));
+            continue;
+        }
+        let style = match parse_style(value) {
+            Ok(style) => style,
+            Err(reason) => {
+                warnings.push(format!("line {n}: {key}: {reason}"));
+                continue;
+            }
+        };
+        let slot = match key {
+            "border_focused" => &mut theme.border_focused,
+            "border_unfocused" => &mut theme.border_unfocused,
+            "popup_border" => &mut theme.popup_border,
+            "status_bar" => &mut theme.status_bar,
+            "selection" => &mut theme.selection,
+            "prompt_cursor" => &mut theme.prompt_cursor,
+            "welcome" => &mut theme.welcome,
+            "tree_open" => &mut theme.tree_open,
+            "text" => &mut theme.text,
+            "mark" => &mut theme.mark,
+            "heading1" => &mut theme.heading1,
+            "heading2" => &mut theme.heading2,
+            "heading" => &mut theme.heading,
+            "bold" => &mut theme.bold,
+            "italic" => &mut theme.italic,
+            "code" => &mut theme.code,
+            "checkbox" => &mut theme.checkbox,
+            "done" => &mut theme.done,
+            "quote" => &mut theme.quote,
+            "link" => &mut theme.link,
+            "bullet" => &mut theme.bullet,
+            "html_tag" => &mut theme.html_tag,
+            "html_attr" => &mut theme.html_attr,
+            "search_match" => &mut theme.search_match,
+            _ => {
+                warnings.push(format!("line {n}: unknown option: {key}"));
+                continue;
+            }
+        };
+        *slot = style;
+    }
+    warnings
+}
+
+/// Load the theme named `name` from `dir` (normally
+/// `$XDG_CONFIG_HOME/mrkdup`), applying the load order:
+///
+/// 1. `Theme::named(name)` — one of the three builtins, or
+///    `Theme::default()` if `name` isn't a builtin.
+/// 2. If `name` isn't a builtin, `dir/themes/<name>` is read as an
+///    overlay on top of `default`. A missing file is a warning
+///    (unknown theme name), not a hard failure — the theme stays
+///    `default`.
+/// 3. If `dir/theme` exists, it's applied last, on top of whatever
+///    came out of steps 1-2.
+///
+/// `name` is assumed syntactically valid (`config::parse` already
+/// rejected anything else at config-load time).
+pub fn load_from(name: &str, dir: &Path) -> (Theme, Vec<String>) {
+    let mut theme = Theme::named(name);
+    let mut warnings = Vec::new();
+
+    if !is_builtin(name) {
+        let path = dir.join("themes").join(name);
+        match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                warnings.extend(
+                    parse_overlay(&text, &mut theme)
+                        .into_iter()
+                        .map(|w| format!("themes/{name}: {w}")),
+                );
+            }
+            Err(_) => {
+                warnings.push(format!(
+                    "themes/{name}: unknown theme name (no such file); using default"
+                ));
+            }
+        }
+    }
+
+    if let Ok(text) = std::fs::read_to_string(dir.join("theme")) {
+        warnings.extend(
+            parse_overlay(&text, &mut theme)
+                .into_iter()
+                .map(|w| format!("theme: {w}")),
+        );
+    }
+
+    (theme, warnings)
+}
+
+/// `load_from` rooted at `$XDG_CONFIG_HOME/mrkdup` (falling back to
+/// `~/.config/mrkdup`), same as `config::load`. No config directory at
+/// all just means the named builtin (or `default`), no warnings.
+pub fn load(name: &str) -> (Theme, Vec<String>) {
+    match crate::config::config_dir() {
+        Some(dir) => load_from(name, &dir),
+        None => (Theme::named(name), Vec::new()),
     }
 }
 

@@ -30,8 +30,10 @@ fn main() -> io::Result<()> {
         Some(p) => PathBuf::from(p),
         None => env::current_dir()?,
     };
-    let (config, warnings) = config::load();
-    let mut app = app::App::new(root, config)?;
+    let (config, mut warnings) = config::load();
+    let (theme, theme_warnings) = theme::load(&config.theme_name);
+    warnings.extend(theme_warnings);
+    let mut app = app::App::new_with_theme(root, config, theme)?;
     if !warnings.is_empty() {
         app.status = Some(format!(
             "config: ignored {} line(s) — {}",

@@ -106,14 +106,21 @@ fn valid_theme_name(name: &str) -> bool {
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
 }
 
-/// The config file path: `$XDG_CONFIG_HOME/mrkdup/config`, falling back
-/// to `~/.config/mrkdup/config`.
-fn config_path() -> Option<PathBuf> {
+/// The `$XDG_CONFIG_HOME/mrkdup` directory, falling back to
+/// `~/.config/mrkdup`. Shared by `config_path` here and by
+/// `theme::load`.
+pub(crate) fn config_dir() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("mrkdup").join("config"))
+    Some(base.join("mrkdup"))
+}
+
+/// The config file path: `$XDG_CONFIG_HOME/mrkdup/config`, falling back
+/// to `~/.config/mrkdup/config`.
+fn config_path() -> Option<PathBuf> {
+    config_dir().map(|dir| dir.join("config"))
 }
 
 /// Load the config file. Absent or unreadable file = all defaults; this

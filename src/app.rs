@@ -68,11 +68,25 @@ pub struct App {
 }
 
 impl App {
+    /// `new_with_theme` looking the theme up by name alone, with no
+    /// overlay files applied. Since `main.rs` resolves the theme via
+    /// `theme::load` (which does apply overlays) and calls
+    /// `new_with_theme` directly, this shorthand is only exercised by
+    /// tests that don't care about theme overlays.
+    #[cfg(test)]
     pub fn new(root: PathBuf, config: Config) -> io::Result<App> {
+        let theme = Theme::named(&config.theme_name);
+        App::new_with_theme(root, config, theme)
+    }
+
+    /// Same as `new`, but with an already-resolved `Theme` (e.g. one
+    /// loaded from disk via `theme::load`, overlay files and all)
+    /// instead of looking one up by `config.theme_name` again.
+    pub fn new_with_theme(root: PathBuf, config: Config, theme: Theme) -> io::Result<App> {
         Ok(App {
             tree: Tree::new(root)?,
             editor: Editor::new(),
-            theme: Theme::named(&config.theme_name),
+            theme,
             config,
             focus: Focus::Tree,
             tree_visible: true,
