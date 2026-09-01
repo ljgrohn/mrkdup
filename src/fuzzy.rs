@@ -16,8 +16,9 @@ pub(crate) fn rel_display(root: &Path, path: &Path) -> String {
 }
 
 /// All text files under `root` as (root-relative display path, absolute
-/// path), sorted by relative path, capped at 5000. Respects .gitignore,
-/// skips .git, and includes dotfiles only when `show_hidden` is set.
+/// path), sorted by relative path, capped at 5000. Skips .git, and
+/// respects .gitignore and omits dotfiles unless `show_hidden` is set
+/// (the tree's one "show everything" switch).
 ///
 /// Deliberately does not use `Tree`'s (path, mtime) -> is_text cache: this
 /// walk runs once per Ctrl+P popup open (a user action), not on a ~2s
@@ -31,6 +32,8 @@ pub(crate) fn collect_candidates(root: &Path, show_hidden: bool) -> Vec<(String,
     let ignores = crate::tree::root_gitignore(root);
     let walker = ignore::WalkBuilder::new(root)
         .hidden(!show_hidden)
+        .git_ignore(!show_hidden)
+        .git_exclude(!show_hidden)
         .require_git(false)
         .git_global(false)
         .parents(false)
@@ -44,7 +47,7 @@ pub(crate) fn collect_candidates(root: &Path, show_hidden: bool) -> Vec<(String,
             continue;
         }
         let path = entry.into_path();
-        if crate::tree::is_root_ignored(&ignores, root, &path, false) {
+        if !show_hidden && crate::tree::is_root_ignored(&ignores, root, &path, false) {
             continue;
         }
         if !crate::fsutil::is_text_file(&path) {

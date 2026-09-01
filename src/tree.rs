@@ -292,6 +292,8 @@ fn cached_is_text_file(path: &Path, cache: &mut HashMap<PathBuf, (SystemTime, bo
 /// sorted case-insensitively. Honors per-directory .gitignore, plus the
 /// tree root's own .gitignore (which a plain `WalkBuilder::new(dir)`
 /// with `parents(false)` would otherwise miss for `dir != root`).
+/// `show_hidden` is the tree's one "show everything" switch: it reveals
+/// dotfiles *and* gitignored files together.
 ///
 /// `cache` is `Tree::text_cache`: a (path, mtime) -> is_text cache so a
 /// tree refresh doesn't re-sniff every file's contents every ~2s. After
@@ -317,6 +319,8 @@ fn list_dir(
     let walker = ignore::WalkBuilder::new(dir)
         .max_depth(Some(1))
         .hidden(!show_hidden)
+        .git_ignore(!show_hidden)
+        .git_exclude(!show_hidden)
         .require_git(false)
         .git_global(false)
         .parents(false)
@@ -330,7 +334,7 @@ fn list_dir(
         }
         let is_dir = entry.file_type().is_some_and(|t| t.is_dir());
         let path = entry.into_path();
-        if is_root_ignored(&ignores, root, &path, is_dir) {
+        if !show_hidden && is_root_ignored(&ignores, root, &path, is_dir) {
             continue;
         }
         if !is_dir {
@@ -560,6 +564,43 @@ mod tests {
         let rows = names(&t);
         assert!(rows.contains(&"keep.md".to_string()));
         assert!(!rows.contains(&"debug.log".to_string()));
+    }
+
+    #[test]
+    fn toggle_hidden_also_shows_gitignored_files() {
+        let root = std::env::temp_dir().join("mrkdup-tree-showignored");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("notes")).unwrap();
+        fs::write(root.join(".gitignore"), "*.log\n").unwrap();
+        fs::write(root.join("notes/debug.log"), "d\n").unwrap();
+        fs::write(root.join("notes/.gitignore"), "local.md\n").unwrap();
+        fs::write(root.join("notes/local.md"), "l\n").unwrap();
+        fs::write(root.join("notes/keep.md"), "k\n").unwrap();
+
+        let mut t = Tree::new(root).unwrap();
+        t.expand(); // selection starts at 0 = notes
+        assert!(!names(&t).contains(&"debug.log".to_string()));
+        assert!(!names(&t).contains(&"local.md".to_string()));
+
+        t.toggle_hidden();
+        let rows = names(&t);
+        assert!(rows.contains(&"keep.md".to_string()));
+        assert!(
+            rows.contains(&"debug.log".to_string()),
+            "root .gitignore rule"
+        );
+        assert!(
+            rows.contains(&"local.md".to_string()),
+            "nested .gitignore rule"
+        );
+        assert!(
+            rows.contains(&".gitignore".to_string()),
+            "dotfiles still shown"
+        );
+
+        t.toggle_hidden();
+        assert!(!names(&t).contains(&"debug.log".to_string()));
+        assert!(!names(&t).contains(&"local.md".to_string()));
     }
 
     #[test]

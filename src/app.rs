@@ -1516,6 +1516,31 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_p_shows_gitignored_files_only_when_hidden_is_toggled_on() {
+        let root = fixture("gtf-ignored");
+        fs::write(root.join(".gitignore"), "*.log\n").unwrap();
+        fs::create_dir_all(root.join("notes")).unwrap();
+        fs::write(root.join("notes/debug.log"), "d\n").unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
+        app.handle_key(ctrl('p'));
+        match &app.prompt {
+            Prompt::GoToFile { candidates, .. } => {
+                assert!(!candidates.iter().any(|c| c.0 == "notes/debug.log"));
+            }
+            _ => panic!("expected go-to-file prompt"),
+        }
+        app.handle_key(key(KeyCode::Esc));
+        app.handle_key(key(KeyCode::Char('.'))); // tree: show hidden + ignored
+        app.handle_key(ctrl('p'));
+        match &app.prompt {
+            Prompt::GoToFile { candidates, .. } => {
+                assert!(candidates.iter().any(|c| c.0 == "notes/debug.log"));
+            }
+            _ => panic!("expected go-to-file prompt"),
+        }
+    }
+
+    #[test]
     fn esc_closes_go_to_file_without_opening() {
         let mut app = App::new(fixture("gtf-esc"), Config::default()).unwrap();
         app.handle_key(ctrl('p'));
