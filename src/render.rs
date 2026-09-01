@@ -8,39 +8,60 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
-use ratatui_textarea::DataCursor;
 
-use crate::app::{find_ci, App};
+use crate::layout_cache::LayoutCache;
+use crate::search::find_ci;
 use crate::{highlight, wrap};
 
-pub fn render_editor(f: &mut Frame, app: &mut App, inner: Rect, focused: bool) {
+/// Everything `render_editor` needs to draw one frame of the editor pane.
+/// `ui::draw_editor` gathers this from `Editor` and `App` state, so this
+/// module never has to depend on `App` itself.
+pub struct EditorView<'a> {
+    pub lines: &'a [String],
+    pub cursor: (usize, usize),
+    pub selection: Option<((usize, usize), (usize, usize))>,
+    pub search: Option<&'a str>,
+    pub file_kind: highlight::FileKind,
+    pub scroll: &'a mut usize,
+    /// Wrap + highlight cache, owned by `Editor`. Recomputed here only
+    /// when it's stale, the width changed, or the file kind changed.
+    pub cache: &'a mut LayoutCache,
+}
+
+pub fn render_editor(f: &mut Frame, view: EditorView, inner: Rect, focused: bool) {
     let width = inner.width as usize;
     let height = inner.height as usize;
     if width == 0 || height == 0 {
         return;
     }
-    let lines: Vec<String> = app.editor.textarea.lines().to_vec();
-    let rows = wrap::layout(&lines, width);
-    let DataCursor(crow, ccol) = app.editor.textarea.cursor();
-    let (cvrow, cx) = wrap::cursor_position(&rows, &lines, (crow, ccol));
-    app.editor_scroll = wrap::scroll_top(
-        app.editor_scroll.min(rows.len().saturating_sub(1)),
-        cvrow,
-        height,
-    );
+    let EditorView {
+        lines,
+        cursor,
+        selection,
+        search,
+        file_kind,
+        scroll,
+        cache,
+    } = view;
+    let (rows, spans) = cache.ensure(lines, width, file_kind);
+    let (cvrow, cx) = wrap::cursor_position(rows, lines, cursor);
+    *scroll = wrap::scroll_top((*scroll).min(rows.len().saturating_sub(1)), cvrow, height);
 
-    let kind = highlight::file_kind(app.editor.path.as_deref());
-    let spans = highlight::highlight(&lines, kind);
-    let selection = app.editor.textarea.selection_range();
-    let search: Option<(String, usize)> = app
-        .search_highlight
-        .as_ref()
+    let search: Option<(String, usize)> = search
         .filter(|q| !q.is_empty())
-        .map(|q| (q.clone(), q.chars().count()));
+        .map(|q| (q.to_string(), q.chars().count()));
+
+    // Span cursor state, carried across rows: within the visible window
+    // `row.line` only ever increases (rows are generated in line order,
+    // and wrapped rows of one line run start..end contiguously), so a
+    // single advancing index per line gives O(1) amortized lookup per
+    // painted character instead of an O(spans) scan per character.
+    let mut span_cursor_line: Option<usize> = None;
+    let mut span_i: usize = 0;
 
     let out: Vec<Line> = rows
         .iter()
-        .skip(app.editor_scroll)
+        .skip(*scroll)
         .take(height)
         .map(|row| {
             let line = &lines[row.line];
@@ -53,9 +74,21 @@ pub fn render_editor(f: &mut Frame, app: &mut App, inner: Rect, focused: bool) {
                     from = p + 1;
                 }
             }
+            let line_spans = &spans[row.line];
+            if span_cursor_line != Some(row.line) {
+                span_cursor_line = Some(row.line);
+                span_i = 0;
+            }
             let mut runs: Vec<(String, Style)> = Vec::new();
             for (ci, &ch) in chars.iter().enumerate().take(row.end).skip(row.start) {
-                let mut st = style_at(&spans[row.line], ci);
+                while span_i < line_spans.len() && ci >= line_spans[span_i].end {
+                    span_i += 1;
+                }
+                let mut st = line_spans
+                    .get(span_i)
+                    .filter(|s| ci >= s.start && ci < s.end)
+                    .map(|s| highlight::style(s.kind))
+                    .unwrap_or_default();
                 if match_ranges.iter().any(|&(a, b)| ci >= a && ci < b) {
                     st = st.bg(Color::Yellow).fg(Color::Black);
                 }
@@ -83,17 +116,9 @@ pub fn render_editor(f: &mut Frame, app: &mut App, inner: Rect, focused: bool) {
     f.render_widget(Paragraph::new(out), inner);
     if focused {
         let x = inner.x + cx.min(width.saturating_sub(1)) as u16;
-        let y = inner.y + (cvrow - app.editor_scroll) as u16;
+        let y = inner.y + (cvrow - *scroll) as u16;
         f.set_cursor_position((x, y));
     }
-}
-
-fn style_at(spans: &[highlight::SpanTok], ci: usize) -> Style {
-    spans
-        .iter()
-        .find(|s| ci >= s.start && ci < s.end)
-        .map(|s| highlight::style(s.kind))
-        .unwrap_or_default()
 }
 
 fn in_selection(sel: Option<((usize, usize), (usize, usize))>, line: usize, ci: usize) -> bool {
@@ -107,6 +132,7 @@ mod tests {
     use crate::app::{App, Focus};
     use crate::config::Config;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::style::Modifier;
     use ratatui::{backend::TestBackend, Terminal};
     use std::fs;
 
@@ -176,6 +202,88 @@ mod tests {
         // the full line can't fit on one row, so some x-run appears twice
         let rows_with_x = text.lines().filter(|l| l.contains("xxxxx")).count();
         assert!(rows_with_x >= 2, "expected wrapped rows: {text}");
+    }
+
+    #[test]
+    fn styling_stays_correct_across_a_soft_wrap_boundary() {
+        // One long logical line, no spaces, so wrap.rs hard-breaks it
+        // into several rows of a fixed column count. The `**Z**` / `*W*`
+        // / `.` pattern repeats on a period of 9 chars, which the pane's
+        // wrap width (~42-44 cols) doesn't evenly divide, so at least
+        // one row boundary is guaranteed to land inside a Bold or
+        // Italic span -- exactly the case an off-by-one in the D2 span
+        // cursor (reset-on-line-change, forward-only advance) would
+        // paint with a stale or wrong style.
+        let unit = "**Z***W*.";
+        let content = unit.repeat(30);
+        let root = fixture("wrap-styles", &format!("{content}\n"));
+        let mut app = App::new(root, Config::default()).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+
+        let backend = TestBackend::new(80, 16);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        let buf = terminal.backend().buffer();
+
+        // Walk the editor pane (x >= tree_width, y above the status
+        // line) in on-screen order: top-to-bottom, left-to-right. That
+        // is the same order the sentinel characters appear in the
+        // source line, across however many wrapped rows it takes, so
+        // the extracted sequence can be compared directly against the
+        // source without knowing the exact wrap width.
+        let mut seen: Vec<(char, bool, bool)> = Vec::new(); // (char, bold, italic)
+        let mut rows_seen = std::collections::HashSet::new();
+        for y in 0..15u16 {
+            for x in 30..80u16 {
+                if let Some(cell) = buf.cell((x, y)) {
+                    let sym = cell.symbol();
+                    if sym == "Z" || sym == "W" || sym == "." {
+                        let ch = sym.chars().next().unwrap();
+                        let bold = cell.modifier.contains(Modifier::BOLD);
+                        let italic = cell.modifier.contains(Modifier::ITALIC);
+                        seen.push((ch, bold, italic));
+                        rows_seen.insert(y);
+                    }
+                }
+            }
+        }
+
+        assert!(
+            rows_seen.len() >= 2,
+            "expected the line to wrap across multiple rows, saw rows: {rows_seen:?}"
+        );
+
+        let expected: Vec<(char, bool, bool)> = content
+            .chars()
+            .filter(|&c| c == 'Z' || c == 'W' || c == '.')
+            .map(|c| match c {
+                'Z' => ('Z', true, false),
+                'W' => ('W', false, true),
+                _ => ('.', false, false),
+            })
+            .collect();
+
+        assert_eq!(
+            seen, expected,
+            "styling diverged from source order across a wrap boundary"
+        );
+    }
+
+    #[test]
+    fn painting_twice_without_an_edit_reuses_the_layout_cache() {
+        let root = fixture("cache", "# Title\nplain text\n");
+        let mut app = App::new(root, Config::default()).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        draw_to_string(&mut app);
+        assert_eq!(app.editor.layout_recomputes(), 1);
+        // a second paint with nothing changed (no edit, no resize) must
+        // not redo wrap+highlight
+        draw_to_string(&mut app);
+        assert_eq!(app.editor.layout_recomputes(), 1);
+        // an actual edit does invalidate and recompute
+        app.handle_key(key(KeyCode::Char('!')));
+        draw_to_string(&mut app);
+        assert_eq!(app.editor.layout_recomputes(), 2);
     }
 
     #[test]

@@ -10,7 +10,8 @@ bold/italic, inline and fenced code, checkboxes (done items dimmed),
 blockquotes, links, YAML frontmatter — plus HTML tag/attribute/string
 coloring in `.html` files and for inline HTML in markdown. Every
 character stays visible; syntax marks are dimmed, never hidden, so the
-layout never shifts under your cursor.
+layout never shifts under your cursor. Tabs display as 4 spaces, not
+tab-stops.
 
 Until you open a file, the editor pane shows a short key cheat sheet;
 it disappears the moment a file opens.
@@ -40,7 +41,7 @@ mrkdup [directory]   # defaults to the current directory
 | global | Ctrl+B | show/hide tree pane |
 | global | Ctrl+T | show/hide editor pane (tree goes full width) |
 | global | Ctrl+P (tree: p) | go to file (fuzzy finder popup: type to filter, ↑/↓ or Ctrl+J/K choose, Enter opens) |
-| global | Ctrl+Q / Ctrl+C (tree: q) | quit (autosaves; if disk changed, warns — press again to discard) |
+| global | Ctrl+Q / Ctrl+C (tree: q) | quit (works even in prompts; autosaves; if disk changed, warns — press again to discard) |
 | editor | Esc / Shift+Tab | focus tree |
 | tree | Enter / Tab | open file (or expand/collapse dir) |
 | tree | j/k, ↑/↓ | move selection |
@@ -56,7 +57,7 @@ mrkdup [directory]   # defaults to the current directory
 | tree | . | toggle hidden files |
 | editor | Ctrl+S | save (after a disk-conflict warning, a second Ctrl+S overwrites) |
 | editor | Ctrl+Z / Ctrl+Y | undo / redo |
-| editor | Ctrl+D | toggle checkbox on the line (`- [ ]` ↔ `- [x]`; other lines gain a `- [ ] ` prefix) |
+| editor | Ctrl+D | toggle checkbox on the line (`- [ ]` ↔ `- [x]`, `- [X]` → `- [ ]`; other lines gain a `- [ ] ` prefix; Ctrl+Z twice undoes) |
 | editor | Ctrl+F | search in file (popup; case-insensitive; Enter jumps and highlights all matches; empty search repeats the last one) |
 | editor | Ctrl+G | jump to the next match of the last search |
 | editor | Ctrl+J / Ctrl+K | next / previous word |
@@ -106,3 +107,4 @@ Keybindings are not remappable.
 - If a file changed on disk while your buffer is clean, it reloads
   silently. If your buffer is dirty, mrkdup refuses to clobber the disk
   and asks you to confirm with a second Ctrl+S.
+- Line endings are preserved: CRLF files stay CRLF, LF files stay LF.

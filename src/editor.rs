@@ -1,10 +1,17 @@
-use ratatui_textarea::TextArea;
+use ratatui_textarea::{CursorMove, DataCursor, Input, TextArea};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::fsutil;
+use crate::layout_cache::LayoutCache;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Newline {
+    Lf,
+    CrLf,
+}
 
 pub enum SaveOutcome {
     Saved,
@@ -14,16 +21,37 @@ pub enum SaveOutcome {
 }
 
 pub struct Editor {
-    pub textarea: TextArea<'static>,
+    textarea: TextArea<'static>,
     pub path: Option<PathBuf>,
     pub dirty: bool,
     mtime: Option<SystemTime>,
+    newline: Newline,
+    layout_cache: LayoutCache,
 }
 
 // rendering (wrap, styling, cursor, search highlight) lives in render.rs;
 // the textarea here is purely the editing engine
 fn make_textarea(lines: Vec<String>) -> TextArea<'static> {
     TextArea::from(lines)
+}
+
+/// Detect the newline style from raw file bytes.
+/// Scans for the first line terminator (\n):
+/// - If preceded by \r, return CRLF
+/// - Otherwise return LF
+/// - If no line terminator found (empty file), default to LF
+fn detect_newline(bytes: &[u8]) -> Newline {
+    for i in 0..bytes.len() {
+        if bytes[i] == b'\n' {
+            if i > 0 && bytes[i - 1] == b'\r' {
+                return Newline::CrLf;
+            } else {
+                return Newline::Lf;
+            }
+        }
+    }
+    // No line terminator found, default to LF.
+    Newline::Lf
 }
 
 impl Editor {
@@ -33,25 +61,129 @@ impl Editor {
             path: None,
             dirty: false,
             mtime: None,
+            newline: Newline::Lf,
+            layout_cache: LayoutCache::new(),
         }
     }
 
     pub fn open(&mut self, path: &Path) -> io::Result<()> {
-        let text = fs::read_to_string(path)?;
+        let bytes = fs::read(path)?;
+        let newline = detect_newline(&bytes);
+        let text =
+            String::from_utf8(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        // Nothing above mutates `self` — a failed read or a failed UTF-8
+        // validation leaves the currently-open document untouched. Once
+        // we're past validation the rest can't fail, so assign here.
+        self.newline = newline;
         self.textarea = make_textarea(text.lines().map(String::from).collect());
         self.path = Some(path.to_path_buf());
         self.dirty = false;
         self.mtime = disk_mtime(path);
+        self.layout_cache.invalidate();
         Ok(())
     }
 
     pub fn mark_dirty(&mut self) {
         self.dirty = true;
+        self.layout_cache.invalidate();
+    }
+
+    /// The buffer's lines, one `String` per line (no line terminators).
+    pub fn lines(&self) -> &[String] {
+        self.textarea.lines()
+    }
+
+    /// The document lines and the mutable wrap/highlight cache, borrowed
+    /// together from one `&mut self` call so `render.rs` can hold both
+    /// at once without fighting the borrow checker over separate
+    /// accessor calls.
+    pub fn render_parts(&mut self) -> (&[String], &mut LayoutCache) {
+        (self.textarea.lines(), &mut self.layout_cache)
+    }
+
+    /// How many times the wrap/highlight cache has actually recomputed.
+    /// Test-only: lets render tests assert that painting twice without
+    /// an edit doesn't redo the work.
+    #[cfg(test)]
+    pub fn layout_recomputes(&self) -> usize {
+        self.layout_cache.recomputes
+    }
+
+    /// Cursor position as (row, col), both 0-based.
+    pub fn cursor(&self) -> (usize, usize) {
+        let DataCursor(row, col) = self.textarea.cursor();
+        (row, col)
+    }
+
+    /// The line the cursor is currently on, if any.
+    pub fn current_line(&self) -> Option<&str> {
+        let (row, _) = self.cursor();
+        self.textarea.lines().get(row).map(String::as_str)
+    }
+
+    /// Move the cursor to an exact (row, col) position. `CursorMove::Jump`
+    /// only takes `u16` coordinates, so this is the one place that guards
+    /// against a position beyond `u16::MAX`; returns `false` (leaving the
+    /// cursor untouched) when either coordinate doesn't fit.
+    pub fn set_cursor(&mut self, row: usize, col: usize) -> bool {
+        if row > u16::MAX as usize || col > u16::MAX as usize {
+            return false;
+        }
+        self.textarea
+            .move_cursor(CursorMove::Jump(row as u16, col as u16));
+        true
+    }
+
+    /// Move the cursor with any other `CursorMove` variant (word/paragraph/
+    /// line motions, etc). Positions beyond `u16::MAX` are handled by
+    /// `set_cursor`, not this method.
+    pub fn move_cursor(&mut self, m: CursorMove) {
+        self.textarea.move_cursor(m);
+    }
+
+    pub fn insert_str<S: AsRef<str>>(&mut self, s: S) -> bool {
+        self.textarea.insert_str(s)
+    }
+
+    pub fn undo(&mut self) -> bool {
+        self.textarea.undo()
+    }
+
+    pub fn redo(&mut self) -> bool {
+        self.textarea.redo()
+    }
+
+    pub fn input(&mut self, input: Input) -> bool {
+        self.textarea.input(input)
+    }
+
+    pub fn cancel_selection(&mut self) {
+        self.textarea.cancel_selection();
+    }
+
+    pub fn selection_range(&self) -> Option<((usize, usize), (usize, usize))> {
+        self.textarea.selection_range()
+    }
+
+    /// Delete the character before the cursor. Used by the "--0" checkbox
+    /// expansion to remove the two dashes it was triggered on.
+    pub fn delete_char(&mut self) -> bool {
+        self.textarea.delete_char()
+    }
+
+    /// Delete from the cursor to the end of the current line. Used by
+    /// checkbox toggling to rewrite a line in place.
+    pub fn delete_line_by_end(&mut self) -> bool {
+        self.textarea.delete_line_by_end()
     }
 
     fn content(&self) -> String {
-        let mut s = self.textarea.lines().join("\n");
-        s.push('\n');
+        let newline_str = match self.newline {
+            Newline::Lf => "\n",
+            Newline::CrLf => "\r\n",
+        };
+        let mut s = self.textarea.lines().join(newline_str);
+        s.push_str(newline_str);
         s
     }
 
@@ -114,6 +246,36 @@ mod tests {
         ed.open(&p).unwrap();
         assert_eq!(ed.textarea.lines(), ["# a", "", "b"]);
         assert!(!ed.dirty);
+    }
+
+    #[test]
+    fn failed_open_does_not_mutate_the_still_open_document() {
+        // an LF document is already open...
+        let good = tmpfile("txn-good", "line1\nline2\n");
+        let mut ed = Editor::new();
+        ed.open(&good).unwrap();
+        assert_eq!(ed.newline, Newline::Lf);
+
+        // ...then an open of an invalid-UTF-8 (e.g. Latin-1) file fails —
+        // and its bytes are CRLF, so a buggy detect-before-validate order
+        // would stamp CRLF onto the still-open LF document below...
+        let bad = std::env::temp_dir().join("mrkdup-ed-txn-bad.md");
+        fs::write(&bad, [b'x', b'\r', b'\n', 0xff, b'y']).unwrap();
+        assert!(ed.open(&bad).is_err());
+
+        // ...and the still-open LF document is untouched: same path, same
+        // newline style, not marked dirty by the failed attempt.
+        assert_eq!(ed.path.as_deref(), Some(good.as_path()));
+        assert_eq!(ed.newline, Newline::Lf);
+        assert!(!ed.dirty);
+
+        // editing and saving the still-open document preserves LF endings
+        // and its content, rather than picking up CRLF from the failed
+        // open's (never-validated) bytes.
+        ed.textarea.insert_str("hi ");
+        ed.mark_dirty();
+        assert!(matches!(ed.save(false).unwrap(), SaveOutcome::Saved));
+        assert_eq!(fs::read_to_string(&good).unwrap(), "hi line1\nline2\n");
     }
 
     #[test]
@@ -180,5 +342,144 @@ mod tests {
         fs::write(&p, "theirs\n").unwrap();
         assert!(!ed.check_external().unwrap());
         assert_eq!(ed.textarea.lines()[0], "minex");
+    }
+
+    #[test]
+    fn crlf_round_trip_preserved_on_edit_and_save() {
+        // Create a file with CRLF endings using raw bytes.
+        let p = std::env::temp_dir().join("mrkdup-crlf-rt.md");
+        fs::write(&p, b"hello\r\nworld\r\n").unwrap();
+
+        let mut ed = Editor::new();
+        ed.open(&p).unwrap();
+
+        // Verify it detected CRLF.
+        assert_eq!(ed.newline, Newline::CrLf);
+        assert_eq!(ed.textarea.lines(), ["hello", "world"]);
+
+        // Edit and save.
+        ed.textarea.insert_str("!");
+        ed.mark_dirty();
+        assert!(matches!(ed.save(false).unwrap(), SaveOutcome::Saved));
+
+        // Verify file uses only CRLF line endings (no bare \n).
+        let bytes = fs::read(&p).unwrap();
+        let lf_count = bytes.iter().filter(|&&b| b == b'\n').count();
+        let crlf_count = bytes.windows(2).filter(|w| w == b"\r\n").count();
+        assert_eq!(
+            lf_count, crlf_count,
+            "All line endings should be \\r\\n; LF count {} != CRLF count {}",
+            lf_count, crlf_count
+        );
+    }
+
+    #[test]
+    fn lf_round_trip_preserved_on_edit_and_save() {
+        // Create a file with LF endings.
+        let p = std::env::temp_dir().join("mrkdup-lf-rt.md");
+        fs::write(&p, b"hello\nworld\n").unwrap();
+
+        let mut ed = Editor::new();
+        ed.open(&p).unwrap();
+
+        // Verify it detected LF.
+        assert_eq!(ed.newline, Newline::Lf);
+        assert_eq!(ed.textarea.lines(), ["hello", "world"]);
+
+        // Edit and save.
+        ed.textarea.insert_str("!");
+        ed.mark_dirty();
+        assert!(matches!(ed.save(false).unwrap(), SaveOutcome::Saved));
+
+        // Verify file still contains only \n (not \r\n).
+        let bytes = fs::read(&p).unwrap();
+        assert!(
+            !bytes.windows(2).any(|w| w == b"\r\n"),
+            "File should not contain \\r\\n"
+        );
+        let content = String::from_utf8_lossy(&bytes);
+        assert!(content.contains('\n'), "File should contain \\n");
+    }
+
+    #[test]
+    fn empty_file_defaults_to_lf() {
+        // Create an empty file.
+        let p = std::env::temp_dir().join("mrkdup-empty.md");
+        fs::write(&p, b"").unwrap();
+
+        let mut ed = Editor::new();
+        ed.open(&p).unwrap();
+
+        // Verify it defaults to LF for empty files.
+        assert_eq!(ed.newline, Newline::Lf);
+
+        // Type content and save.
+        ed.textarea.insert_str("hello");
+        ed.mark_dirty();
+        assert!(matches!(ed.save(false).unwrap(), SaveOutcome::Saved));
+
+        // Verify file has only \n.
+        let bytes = fs::read(&p).unwrap();
+        assert!(
+            !bytes.windows(2).any(|w| w == b"\r\n"),
+            "File should not contain \\r\\n"
+        );
+    }
+
+    #[test]
+    fn mixed_endings_first_line_terminator_wins_lf() {
+        // Create a file with mostly CRLF but the first line ends in bare LF.
+        // Per the policy, the first line terminator (\n) determines the style.
+        // Even though CRLF is the majority here, LF comes first.
+        let p = std::env::temp_dir().join("mrkdup-mixed-lf-first.md");
+        fs::write(&p, b"hello\nworld\r\nfoo\r\nbar\r\n").unwrap();
+
+        let mut ed = Editor::new();
+        ed.open(&p).unwrap();
+
+        // Verify it detected LF (first terminator).
+        assert_eq!(ed.newline, Newline::Lf);
+
+        // Edit and save.
+        ed.textarea.insert_str("!");
+        ed.mark_dirty();
+        assert!(matches!(ed.save(false).unwrap(), SaveOutcome::Saved));
+
+        // Verify file is now all LF (mixed endings converted to LF).
+        let bytes = fs::read(&p).unwrap();
+        assert!(
+            !bytes.windows(2).any(|w| w == b"\r\n"),
+            "File should not contain \\r\\n"
+        );
+    }
+
+    #[test]
+    fn mixed_endings_first_line_terminator_wins_crlf() {
+        // Create a file with mostly LF but the first line ends in CRLF.
+        // Per the policy, the first line terminator (\n) determines the style.
+        // Even though LF is the majority, CRLF comes first.
+        let p = std::env::temp_dir().join("mrkdup-mixed-crlf-first.md");
+        fs::write(&p, b"hello\r\nworld\nfoo\nbar\n").unwrap();
+
+        let mut ed = Editor::new();
+        ed.open(&p).unwrap();
+
+        // Verify it detected CRLF (first terminator).
+        assert_eq!(ed.newline, Newline::CrLf);
+
+        // Edit and save.
+        ed.textarea.insert_str("!");
+        ed.mark_dirty();
+        assert!(matches!(ed.save(false).unwrap(), SaveOutcome::Saved));
+
+        // Verify file is now all CRLF (mixed endings converted to CRLF).
+        let bytes = fs::read(&p).unwrap();
+        let lf_count = bytes.iter().filter(|&&b| b == b'\n').count();
+        let crlf_count = bytes.windows(2).filter(|w| w == b"\r\n").count();
+        assert_eq!(
+            lf_count, crlf_count,
+            "All line endings should be \\r\\n; LF count {} != CRLF count {}",
+            lf_count, crlf_count
+        );
     }
 }

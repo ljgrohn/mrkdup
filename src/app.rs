@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui_textarea::{CursorMove, DataCursor, Input};
+use ratatui_textarea::{CursorMove, Input};
 
 use crate::config::Config;
 use crate::editor::{Editor, SaveOutcome};
@@ -201,30 +201,11 @@ impl App {
     }
 
     fn move_file(&mut self, src: PathBuf, dest_dir: PathBuf) {
-        let Some(name) = src.file_name() else { return };
-        let target = dest_dir.join(name);
-        if target == src {
-            self.status = Some("already there".into());
-            return;
+        match crate::files::move_to(&mut self.tree, &mut self.editor, &src, &dest_dir) {
+            Ok(Some(status)) => self.status = Some(status),
+            Ok(None) => {}
+            Err(e) => self.status = Some(e),
         }
-        if target.exists() {
-            self.status = Some("a file with that name is already there".into());
-            return;
-        }
-        if let Err(e) = std::fs::rename(&src, &target) {
-            self.status = Some(format!("move failed: {e}"));
-            return;
-        }
-        if self.editor.path.as_deref() == Some(src.as_path()) {
-            self.editor.path = Some(target.clone());
-        }
-        self.tree.refresh();
-        let shown = target
-            .strip_prefix(self.tree.root())
-            .unwrap_or(&target)
-            .to_string_lossy()
-            .into_owned();
-        self.status = Some(format!("moved to {shown}"));
     }
 
     fn start_rename(&mut self) {
@@ -248,38 +229,16 @@ impl App {
 
     /// Rename `src` to `name` within its own directory.
     fn submit_rename(&mut self, src: &std::path::Path, name: &str) {
-        if name.is_empty() || name.contains('/') || name == ".." {
-            self.status = Some("invalid file name".into());
-            return;
+        match crate::files::rename(&mut self.tree, &mut self.editor, src, name) {
+            Ok(Some(status)) => self.status = Some(status),
+            Ok(None) => {}
+            Err(e) => self.status = Some(e),
         }
-        let Some(dir) = src.parent() else { return };
-        let target = dir.join(name);
-        if target == src {
-            return; // unchanged
-        }
-        // on case-insensitive filesystems (macOS default) a case-only
-        // rename makes target "exist" — but it's the same file, allow it
-        let same_file = target.exists()
-            && std::fs::canonicalize(&target).ok() == std::fs::canonicalize(src).ok();
-        if target.exists() && !same_file {
-            self.status = Some("a file with that name already exists".into());
-            return;
-        }
-        if let Err(e) = std::fs::rename(src, &target) {
-            self.status = Some(format!("rename failed: {e}"));
-            return;
-        }
-        if self.editor.path.as_deref() == Some(src) {
-            self.editor.path = Some(target.clone());
-        }
-        // refresh tracks selection by the old (gone) path, so reselect
-        self.tree.refresh();
-        self.tree.select_path(&target);
-        self.status = Some(format!("renamed to {name}"));
     }
 
     fn open_go_to_file(&mut self) {
-        let candidates = collect_candidates(self.tree.root(), self.tree.show_hidden());
+        let candidates =
+            crate::fuzzy::collect_candidates(self.tree.root(), self.tree.show_hidden());
         self.prompt = Prompt::GoToFile {
             input: String::new(),
             candidates,
@@ -301,17 +260,16 @@ impl App {
     }
 
     fn delete_file(&mut self, path: PathBuf) {
-        if let Err(e) = std::fs::remove_file(&path) {
-            self.status = Some(format!("delete failed: {e}"));
-            return;
+        let was_open = self.editor.path.as_deref() == Some(path.as_path());
+        match crate::files::delete(&mut self.tree, &mut self.editor, &path) {
+            Ok(status) => {
+                self.status = Some(status);
+                if was_open {
+                    self.last_edit = None;
+                }
+            }
+            Err(e) => self.status = Some(e),
         }
-        if self.editor.path.as_deref() == Some(path.as_path()) {
-            self.editor = Editor::new();
-            self.last_edit = None;
-        }
-        self.tree.refresh();
-        let name = path.file_name().unwrap_or_default().to_string_lossy();
-        self.status = Some(format!("deleted {name}"));
     }
 
     fn open_selected(&mut self) {
@@ -377,10 +335,10 @@ impl App {
             // crate defaults make Ctrl+K kill-to-end-of-line; we use
             // Ctrl+J/Ctrl+K as word motions instead
             (true, KeyCode::Char('j')) => {
-                self.editor.textarea.move_cursor(CursorMove::WordForward);
+                self.editor.move_cursor(CursorMove::WordForward);
             }
             (true, KeyCode::Char('k')) => {
-                self.editor.textarea.move_cursor(CursorMove::WordBack);
+                self.editor.move_cursor(CursorMove::WordBack);
             }
             (true, KeyCode::Char('g')) => {
                 if self.last_search.is_empty() {
@@ -393,12 +351,12 @@ impl App {
             // crate defaults are Ctrl+U/Ctrl+R with Ctrl+Y = paste;
             // intercept so the advertised keys work
             (true, KeyCode::Char('z')) => {
-                if self.editor.textarea.undo() {
+                if self.editor.undo() {
                     self.note_edit();
                 }
             }
             (true, KeyCode::Char('y')) => {
-                if self.editor.textarea.redo() {
+                if self.editor.redo() {
                     self.note_edit();
                 }
             }
@@ -421,7 +379,7 @@ impl App {
                 } else {
                     CursorMove::ParagraphBack
                 };
-                self.editor.textarea.move_cursor(mv);
+                self.editor.move_cursor(mv);
             }
             // typing "--0" expands to a markdown checkbox "- [ ] "
             (false, KeyCode::Char('0'))
@@ -430,13 +388,13 @@ impl App {
                     .intersects(KeyModifiers::ALT | KeyModifiers::SUPER)
                     && self.checkbox_trigger_armed() =>
             {
-                self.editor.textarea.delete_char(); // the two dashes
-                self.editor.textarea.delete_char();
-                self.editor.textarea.insert_str("- [ ] ");
+                self.editor.delete_char(); // the two dashes
+                self.editor.delete_char();
+                self.editor.insert_str("- [ ] ");
                 self.note_edit();
             }
             _ => {
-                if self.editor.textarea.input(Input::from(key)) {
+                if self.editor.input(Input::from(key)) {
                     self.note_edit();
                 }
             }
@@ -451,41 +409,33 @@ impl App {
     fn toggle_checkbox(&mut self) {
         // an active selection would make the moves below extend it and
         // delete_line_by_end would then eat the whole selection
-        self.editor.textarea.cancel_selection();
-        let DataCursor(row, col) = self.editor.textarea.cursor();
-        let Some(old) = self.editor.textarea.lines().get(row).cloned() else {
+        self.editor.cancel_selection();
+        let (row, col) = self.editor.cursor();
+        let Some(old) = self.editor.current_line().map(str::to_string) else {
             return;
         };
-        let new = toggle_checkbox_line(&old);
+        let new = crate::checkbox::toggle_checkbox_line(&old);
         // Head, not Jump(row as u16, _): u16 would truncate past line 65535
-        self.editor.textarea.move_cursor(CursorMove::Head);
+        self.editor.move_cursor(CursorMove::Head);
         if !old.is_empty() {
             // an empty line would delete the newline instead — skip
-            self.editor.textarea.delete_line_by_end();
+            self.editor.delete_line_by_end();
         }
-        self.editor.textarea.insert_str(&new);
+        self.editor.insert_str(&new);
         let delta = new.chars().count() - old.chars().count();
         let new_col = (col + delta).min(new.chars().count());
-        if row <= u16::MAX as usize && new_col <= u16::MAX as usize {
-            self.editor
-                .textarea
-                .move_cursor(CursorMove::Jump(row as u16, new_col as u16));
-        }
+        self.editor.set_cursor(row, new_col);
         self.note_edit();
     }
 
     /// True when the two chars before the cursor are exactly "--"
     /// (not part of a longer dash run).
     fn checkbox_trigger_armed(&self) -> bool {
-        let DataCursor(row, col) = self.editor.textarea.cursor();
-        let Some(line) = self.editor.textarea.lines().get(row) else {
+        let (_, col) = self.editor.cursor();
+        let Some(line) = self.editor.current_line() else {
             return false;
         };
-        let before: Vec<char> = line.chars().take(col).collect();
-        col >= 2
-            && before[col - 1] == '-'
-            && before[col - 2] == '-'
-            && (col == 2 || before[col - 3] != '-')
+        crate::checkbox::trigger_armed(line, col)
     }
 
     fn note_edit(&mut self) {
@@ -532,7 +482,15 @@ impl App {
     }
 
     fn prompt_key(&mut self, key: KeyEvent) {
-        if key.modifiers.contains(KeyModifiers::CONTROL) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+        // Handle Ctrl+Q and Ctrl+C first - they should quit even in prompts
+        if ctrl && matches!(key.code, KeyCode::Char('q') | KeyCode::Char('c')) {
+            self.do_quit();
+            return;
+        }
+
+        if ctrl {
             // Ctrl+J/Ctrl+K move the go-to-file selection
             if let Prompt::GoToFile {
                 input,
@@ -540,7 +498,7 @@ impl App {
                 selected,
             } = &mut self.prompt
             {
-                let n = fuzzy_filter(input, candidates).len();
+                let n = crate::fuzzy::fuzzy_filter(input, candidates).len();
                 match key.code {
                     KeyCode::Char('j') => *selected = (*selected + 1).min(n.saturating_sub(1)),
                     KeyCode::Char('k') => *selected = selected.saturating_sub(1),
@@ -621,12 +579,12 @@ impl App {
                     *selected = 0;
                 }
                 KeyCode::Down => {
-                    let n = fuzzy_filter(input, candidates).len();
+                    let n = crate::fuzzy::fuzzy_filter(input, candidates).len();
                     *selected = (*selected + 1).min(n.saturating_sub(1));
                 }
                 KeyCode::Up => *selected = selected.saturating_sub(1),
                 KeyCode::Enter => {
-                    let target = fuzzy_filter(input, candidates)
+                    let target = crate::fuzzy::fuzzy_filter(input, candidates)
                         .get(*selected)
                         .map(|c| c.1.clone());
                     self.prompt = Prompt::None;
@@ -659,33 +617,10 @@ impl App {
     }
 
     fn submit_new_file(&mut self, name: &str) {
-        let name = name.trim();
-        if name.is_empty() || name.starts_with('/') || name.split('/').any(|part| part == "..") {
-            self.status = Some("invalid file name".into());
-            return;
+        match crate::files::create(&mut self.tree, name) {
+            Ok(path) => self.open_file(path),
+            Err(e) => self.status = Some(e),
         }
-        let base = match self.tree.selected_row() {
-            Some(r) if r.is_dir => r.path.clone(),
-            Some(r) => r.path.parent().unwrap_or(self.tree.root()).to_path_buf(),
-            None => self.tree.root().to_path_buf(),
-        };
-        let path = base.join(name);
-        if path.exists() {
-            self.status = Some("file already exists".into());
-            return;
-        }
-        if let Some(parent) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                self.status = Some(format!("create failed: {e}"));
-                return;
-            }
-        }
-        if let Err(e) = crate::fsutil::atomic_write(&path, b"") {
-            self.status = Some(format!("create failed: {e}"));
-            return;
-        }
-        self.tree.refresh();
-        self.open_file(path);
     }
 
     /// Literal, case-insensitive, wraps around; starts one char after the cursor.
@@ -695,150 +630,29 @@ impl App {
         }
         // the renderer highlights every (case-insensitive) match of this
         self.search_highlight = Some(query.to_string());
-        let DataCursor(crow, ccol) = self.editor.textarea.cursor();
-        let lines: Vec<String> = self.editor.textarea.lines().to_vec();
-        let n = lines.len();
-        for i in 0..=n {
-            let row = (crow + i) % n;
-            let hay = &lines[row];
-            let from_char = if i == 0 { ccol + 1 } else { 0 };
-            if let Some(cpos) = find_ci(hay, query, from_char) {
-                if row > u16::MAX as usize || cpos > u16::MAX as usize {
-                    // Jump takes u16; truncating would land on the wrong line
+        let (crow, ccol) = self.editor.cursor();
+        let lines: Vec<String> = self.editor.lines().to_vec();
+        self.last_search = query.to_string();
+        match crate::search::next(&lines, (crow, ccol), query) {
+            Some((row, cpos)) => {
+                // set_cursor guards the u16::MAX bound that Jump takes
+                if !self.editor.set_cursor(row, cpos) {
                     self.status = Some("match is beyond line 65535 — cannot jump".into());
-                    self.last_search = query.to_string();
                     return;
                 }
-                self.editor.textarea.cancel_selection();
-                self.editor
-                    .textarea
-                    .move_cursor(CursorMove::Jump(row as u16, cpos as u16));
-                self.last_search = query.to_string();
-                return;
+                self.editor.cancel_selection();
+            }
+            None => {
+                self.status = Some(format!("not found: {query}"));
             }
         }
-        self.status = Some(format!("not found: {query}"));
-        self.last_search = query.to_string();
-    }
-}
-
-/// Case-insensitive literal find: the char index of the first match of
-/// `query` in `hay` at or after char index `from_char`.
-pub(crate) fn find_ci(hay: &str, query: &str, from_char: usize) -> Option<usize> {
-    let h: Vec<char> = hay.chars().collect();
-    let q: Vec<char> = query.chars().collect();
-    if q.is_empty() || h.len() < q.len() {
-        return None;
-    }
-    let ci_eq = |a: &char, b: &char| a.to_lowercase().eq(b.to_lowercase());
-    (from_char..=h.len() - q.len()).find(|&start| {
-        h[start..start + q.len()]
-            .iter()
-            .zip(&q)
-            .all(|(a, b)| ci_eq(a, b))
-    })
-}
-
-/// All text files under `root` as (root-relative display path, absolute
-/// path), sorted by relative path, capped at 5000. Respects .gitignore,
-/// skips .git, and includes dotfiles only when `show_hidden` is set.
-fn collect_candidates(root: &std::path::Path, show_hidden: bool) -> Vec<(String, PathBuf)> {
-    const CAP: usize = 5000;
-    let mut out = Vec::new();
-    let walker = ignore::WalkBuilder::new(root)
-        .hidden(!show_hidden)
-        .require_git(false)
-        .git_global(false)
-        .parents(false)
-        .filter_entry(|e| e.file_name() != ".git")
-        .build();
-    for entry in walker.flatten() {
-        if out.len() >= CAP {
-            break;
-        }
-        if !entry.file_type().is_some_and(|t| t.is_file()) {
-            continue;
-        }
-        let path = entry.into_path();
-        if !crate::fsutil::is_text_file(&path) {
-            continue;
-        }
-        let rel = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .into_owned();
-        out.push((rel, path));
-    }
-    out.sort_by(|a, b| a.0.cmp(&b.0));
-    out
-}
-
-/// Case-insensitive subsequence match of `query` in `candidate` (greedy,
-/// leftmost). `None` = no match; otherwise a sort key where smaller ranks
-/// first: (query chars outside the longest consecutive matched run,
-/// first match position, candidate length). An empty query matches
-/// everything.
-fn fuzzy_score(query: &str, candidate: &str) -> Option<(usize, usize, usize)> {
-    let q: Vec<char> = query.to_lowercase().chars().collect();
-    let c: Vec<char> = candidate.to_lowercase().chars().collect();
-    if q.is_empty() {
-        // constant score: the stable sort keeps the alphabetical
-        // candidate order for the just-opened, un-filtered popup
-        return Some((0, 0, 0));
-    }
-    let mut positions = Vec::with_capacity(q.len());
-    let mut from = 0;
-    for &qc in &q {
-        let found = from + c[from..].iter().position(|&cc| cc == qc)?;
-        positions.push(found);
-        from = found + 1;
-    }
-    let mut max_run = 1usize;
-    let mut run = 1usize;
-    for w in positions.windows(2) {
-        if w[1] == w[0] + 1 {
-            run += 1;
-            max_run = max_run.max(run);
-        } else {
-            run = 1;
-        }
-    }
-    Some((q.len() - max_run, positions[0], c.len()))
-}
-
-/// The candidates matching `query`, best first (stable: ties keep the
-/// input order).
-pub(crate) fn fuzzy_filter<'a>(
-    query: &str,
-    candidates: &'a [(String, PathBuf)],
-) -> Vec<&'a (String, PathBuf)> {
-    let mut scored: Vec<_> = candidates
-        .iter()
-        .filter_map(|c| fuzzy_score(query, &c.0).map(|s| (s, c)))
-        .collect();
-    scored.sort_by_key(|(s, _)| *s);
-    scored.into_iter().map(|(_, c)| c).collect()
-}
-
-/// The checkbox-toggled form of `line`, indentation preserved.
-fn toggle_checkbox_line(line: &str) -> String {
-    let indent_end = line.len() - line.trim_start().len();
-    let (indent, rest) = line.split_at(indent_end);
-    if let Some(tail) = rest.strip_prefix("- [ ]") {
-        format!("{indent}- [x]{tail}")
-    } else if let Some(tail) = rest.strip_prefix("- [x]") {
-        format!("{indent}- [ ]{tail}")
-    } else if let Some(tail) = rest.strip_prefix("- ") {
-        format!("{indent}- [ ] {tail}")
-    } else {
-        format!("{indent}- [ ] {rest}")
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::search::find_ci;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::fs;
 
@@ -848,9 +662,18 @@ mod tests {
     fn ctrl(c: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
     }
+    /// Nested one level inside `mrkdup-app-{tag}` (a directory this test
+    /// owns) rather than returning that directory itself: `dash_reroots_
+    /// tree_at_parent` reroots the tree at the fixture's *parent*, and if
+    /// the fixture root were the top-level temp dir entry, that parent
+    /// would be the real shared system temp dir -- which hangs on
+    /// GitHub's Ubuntu/macOS runners (see the `is_text_file` fix; they
+    /// leave FIFOs sitting in temp). Keeping the parent owned by the test
+    /// avoids that regardless of what's in the real temp dir.
     fn fixture(tag: &str) -> std::path::PathBuf {
-        let root = std::env::temp_dir().join(format!("mrkdup-app-{tag}"));
-        let _ = fs::remove_dir_all(&root);
+        let owned = std::env::temp_dir().join(format!("mrkdup-app-{tag}"));
+        let _ = fs::remove_dir_all(&owned);
+        let root = owned.join("root");
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("a.md"), "hello\nworld\n").unwrap();
         fs::write(root.join("b.md"), "bee\n").unwrap();
@@ -868,7 +691,7 @@ mod tests {
         let mut app = App::new(fixture("open"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // a.md selected first
         assert!(matches!(app.focus, Focus::Editor));
-        assert_eq!(app.editor.textarea.lines(), ["hello", "world"]);
+        assert_eq!(app.editor.lines(), ["hello", "world"]);
     }
 
     #[test]
@@ -893,7 +716,7 @@ mod tests {
             fs::read_to_string(root.join("a.md")).unwrap(),
             "Xhello\nworld\n"
         );
-        assert_eq!(app.editor.textarea.lines(), ["bee"]);
+        assert_eq!(app.editor.lines(), ["bee"]);
     }
 
     #[test]
@@ -901,11 +724,11 @@ mod tests {
         let mut app = App::new(fixture("undo"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(key(KeyCode::Char('X')));
-        assert_eq!(app.editor.textarea.lines()[0], "Xhello");
+        assert_eq!(app.editor.lines()[0], "Xhello");
         app.handle_key(ctrl('z'));
-        assert_eq!(app.editor.textarea.lines()[0], "hello");
+        assert_eq!(app.editor.lines()[0], "hello");
         app.handle_key(ctrl('y'));
-        assert_eq!(app.editor.textarea.lines()[0], "Xhello");
+        assert_eq!(app.editor.lines()[0], "Xhello");
     }
 
     #[test]
@@ -978,7 +801,7 @@ mod tests {
             app.handle_key(key(KeyCode::Char(c)));
         }
         app.handle_key(key(KeyCode::Enter));
-        assert_eq!(app.editor.textarea.cursor(), (1, 0));
+        assert_eq!(app.editor.cursor(), (1, 0));
     }
 
     #[test]
@@ -988,10 +811,10 @@ mod tests {
         app.handle_key(ctrl('f'));
         app.handle_key(key(KeyCode::Char('l')));
         app.handle_key(key(KeyCode::Enter));
-        assert_eq!(app.editor.textarea.cursor(), (0, 2));
+        assert_eq!(app.editor.cursor(), (0, 2));
         app.handle_key(ctrl('f'));
         app.handle_key(key(KeyCode::Enter)); // empty -> repeat "l"
-        assert_eq!(app.editor.textarea.cursor(), (0, 3));
+        assert_eq!(app.editor.cursor(), (0, 3));
     }
 
     #[test]
@@ -1001,11 +824,11 @@ mod tests {
         app.handle_key(ctrl('f'));
         app.handle_key(key(KeyCode::Char('l')));
         app.handle_key(key(KeyCode::Enter));
-        assert_eq!(app.editor.textarea.cursor(), (0, 2));
+        assert_eq!(app.editor.cursor(), (0, 2));
         app.handle_key(ctrl('g'));
-        assert_eq!(app.editor.textarea.cursor(), (0, 3));
+        assert_eq!(app.editor.cursor(), (0, 3));
         app.handle_key(ctrl('g'));
-        assert_eq!(app.editor.textarea.cursor(), (1, 3)); // "world"
+        assert_eq!(app.editor.cursor(), (1, 3)); // "world"
     }
 
     #[test]
@@ -1013,7 +836,7 @@ mod tests {
         let mut app = App::new(fixture("next-none"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('g'));
-        assert_eq!(app.editor.textarea.cursor(), (0, 0)); // didn't move
+        assert_eq!(app.editor.cursor(), (0, 0)); // didn't move
         assert!(app.status.as_deref().is_some_and(|s| s.contains("search")));
     }
 
@@ -1054,7 +877,7 @@ mod tests {
             app.handle_key(key(KeyCode::Char(c)));
         }
         app.handle_key(key(KeyCode::Enter));
-        assert_eq!(app.editor.textarea.cursor(), (0, 6));
+        assert_eq!(app.editor.cursor(), (0, 6));
         // and the renderer's matcher is literal too: "axb" is no match
         assert_eq!(find_ci("price axb here", "(a.b)", 0), None);
     }
@@ -1080,7 +903,7 @@ mod tests {
         app.handle_key(key(KeyCode::Enter)); // hello / world, cursor (0,0)
         app.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT));
         app.handle_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
-        assert_eq!(app.editor.textarea.lines()[0], "JKhello"); // typed, not moved
+        assert_eq!(app.editor.lines()[0], "JKhello"); // typed, not moved
     }
 
     #[test]
@@ -1090,10 +913,10 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::ALT));
-        let DataCursor(row, _) = app.editor.textarea.cursor();
+        let (row, _) = app.editor.cursor();
         assert!(row >= 1); // moved past the blank line
         app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::ALT));
-        assert_eq!(app.editor.textarea.cursor(), (0, 0));
+        assert_eq!(app.editor.cursor(), (0, 0));
     }
 
     #[test]
@@ -1101,9 +924,9 @@ mod tests {
         let mut app = App::new(fixture("linejump"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // hello
         app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::SUPER));
-        assert_eq!(app.editor.textarea.cursor(), (0, 5)); // end of "hello"
+        assert_eq!(app.editor.cursor(), (0, 5)); // end of "hello"
         app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::SUPER));
-        assert_eq!(app.editor.textarea.cursor(), (0, 0));
+        assert_eq!(app.editor.cursor(), (0, 0));
     }
 
     #[test]
@@ -1113,8 +936,8 @@ mod tests {
         app.handle_key(key(KeyCode::Char('-')));
         app.handle_key(key(KeyCode::Char('-')));
         app.handle_key(key(KeyCode::Char('0')));
-        assert_eq!(app.editor.textarea.lines()[0], "- [ ] hello");
-        assert_eq!(app.editor.textarea.cursor(), (0, 6)); // ready to type the item
+        assert_eq!(app.editor.lines()[0], "- [ ] hello");
+        assert_eq!(app.editor.cursor(), (0, 6)); // ready to type the item
         assert!(app.editor.dirty);
     }
 
@@ -1123,7 +946,7 @@ mod tests {
         let mut app = App::new(fixture("zero"), Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(key(KeyCode::Char('0')));
-        assert_eq!(app.editor.textarea.lines()[0], "0hello");
+        assert_eq!(app.editor.lines()[0], "0hello");
     }
 
     #[test]
@@ -1133,7 +956,7 @@ mod tests {
         for c in "---0".chars() {
             app.handle_key(key(KeyCode::Char(c)));
         }
-        assert_eq!(app.editor.textarea.lines()[0], "---0hello");
+        assert_eq!(app.editor.lines()[0], "---0hello");
     }
 
     #[test]
@@ -1154,7 +977,7 @@ mod tests {
         app.handle_key(key(KeyCode::Enter)); // open a.md ("hello"...)
         app.handle_key(key(KeyCode::Char('q')));
         app.handle_key(key(KeyCode::Char('p')));
-        assert_eq!(app.editor.textarea.lines()[0], "qphello");
+        assert_eq!(app.editor.lines()[0], "qphello");
         assert!(!app.should_quit);
     }
 
@@ -1171,19 +994,10 @@ mod tests {
             app.handle_key(key(KeyCode::Char(c)));
         }
         app.handle_key(key(KeyCode::Enter));
-        assert_eq!(app.editor.textarea.cursor(), (1, 7));
+        assert_eq!(app.editor.cursor(), (1, 7));
         // ...and Ctrl+G wraps around to the capitalized one
         app.handle_key(ctrl('g'));
-        assert_eq!(app.editor.textarea.cursor(), (0, 0));
-    }
-
-    #[test]
-    fn find_ci_handles_unicode_and_offsets() {
-        assert_eq!(find_ci("héLLo héllo", "Éllo", 0), Some(1));
-        assert_eq!(find_ci("héLLo héllo", "Éllo", 2), Some(7));
-        assert_eq!(find_ci("abc", "zzz", 0), None);
-        assert_eq!(find_ci("abc", "", 0), None);
-        assert_eq!(find_ci("ab", "abc", 0), None);
+        assert_eq!(app.editor.cursor(), (0, 0));
     }
 
     #[test]
@@ -1193,15 +1007,15 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('j'));
-        let DataCursor(_, col1) = app.editor.textarea.cursor();
+        let (_, col1) = app.editor.cursor();
         assert!(col1 > 0); // advanced
         app.handle_key(ctrl('j'));
-        let DataCursor(_, col2) = app.editor.textarea.cursor();
+        let (_, col2) = app.editor.cursor();
         assert!(col2 > col1);
         app.handle_key(ctrl('k'));
-        assert_eq!(app.editor.textarea.cursor(), (0, col1));
+        assert_eq!(app.editor.cursor(), (0, col1));
         // nothing was deleted (Ctrl+K used to be kill-to-end-of-line)
-        assert_eq!(app.editor.textarea.lines()[0], "alpha bravo charlie");
+        assert_eq!(app.editor.lines()[0], "alpha bravo charlie");
         assert!(!app.editor.dirty);
     }
 
@@ -1212,8 +1026,8 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('d'));
-        assert_eq!(app.editor.textarea.lines()[0], "- [x] milk");
-        assert_eq!(app.editor.textarea.cursor(), (0, 0)); // same width: cursor stays
+        assert_eq!(app.editor.lines()[0], "- [x] milk");
+        assert_eq!(app.editor.cursor(), (0, 0)); // same width: cursor stays
         assert!(app.editor.dirty);
     }
 
@@ -1224,7 +1038,17 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('d'));
-        assert_eq!(app.editor.textarea.lines()[0], "- [ ] milk");
+        assert_eq!(app.editor.lines()[0], "- [ ] milk");
+    }
+
+    #[test]
+    fn ctrl_d_unchecks_uppercase_checked_checkbox() {
+        let root = fixture("cb-uncheck-upper");
+        fs::write(root.join("a.md"), "- [X] milk\n").unwrap();
+        let mut app = App::new(root, Config::default()).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(ctrl('d'));
+        assert_eq!(app.editor.lines()[0], "- [ ] milk");
     }
 
     #[test]
@@ -1237,10 +1061,7 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT));
         app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT));
         app.handle_key(ctrl('d'));
-        assert_eq!(
-            app.editor.textarea.lines(),
-            ["alpha", "bravo", "- [ ] charlie"]
-        );
+        assert_eq!(app.editor.lines(), ["alpha", "bravo", "- [ ] charlie"]);
     }
 
     #[test]
@@ -1249,7 +1070,7 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(ctrl('b')); // hide tree -> editor focus, no file
         app.handle_key(key(KeyCode::Char('x')));
-        assert_eq!(app.editor.textarea.lines(), [""]); // nothing typed
+        assert_eq!(app.editor.lines(), [""]); // nothing typed
         assert!(!app.editor.dirty);
         assert!(app.status.is_some()); // told the user why
         app.handle_key(key(KeyCode::Esc));
@@ -1263,7 +1084,7 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('d'));
-        assert_eq!(app.editor.textarea.lines()[0], "- [ ] milk");
+        assert_eq!(app.editor.lines()[0], "- [ ] milk");
     }
 
     #[test]
@@ -1272,8 +1093,8 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // "hello", cursor (0,0)
         app.handle_key(ctrl('d'));
-        assert_eq!(app.editor.textarea.lines()[0], "- [ ] hello");
-        assert_eq!(app.editor.textarea.cursor(), (0, 6)); // still on the 'h'
+        assert_eq!(app.editor.lines()[0], "- [ ] hello");
+        assert_eq!(app.editor.cursor(), (0, 6)); // still on the 'h'
     }
 
     #[test]
@@ -1283,10 +1104,10 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('d'));
-        assert_eq!(app.editor.textarea.lines()[0], "  - [x] a");
+        assert_eq!(app.editor.lines()[0], "  - [x] a");
         app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         app.handle_key(ctrl('d'));
-        assert_eq!(app.editor.textarea.lines()[1], "    - [ ] plain");
+        assert_eq!(app.editor.lines()[1], "    - [ ] plain");
     }
 
     #[test]
@@ -1296,7 +1117,7 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(ctrl('d'));
-        assert_eq!(app.editor.textarea.lines(), ["- [ ] ", "world"]);
+        assert_eq!(app.editor.lines(), ["- [ ] ", "world"]);
     }
 
     #[test]
@@ -1305,11 +1126,11 @@ mod tests {
         let mut app = App::new(root, Config::default()).unwrap();
         app.handle_key(key(KeyCode::Enter)); // "hello"
         app.handle_key(ctrl('d'));
-        assert_eq!(app.editor.textarea.lines()[0], "- [ ] hello");
+        assert_eq!(app.editor.lines()[0], "- [ ] hello");
         // the toggle is a delete + an insert, so two undo steps
         app.handle_key(ctrl('z'));
         app.handle_key(ctrl('z'));
-        assert_eq!(app.editor.textarea.lines()[0], "hello");
+        assert_eq!(app.editor.lines()[0], "hello");
     }
 
     #[test]
@@ -1318,7 +1139,7 @@ mod tests {
         app.handle_key(key(KeyCode::Enter)); // open a.md
         app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
         assert!(matches!(app.focus, Focus::Tree));
-        assert_eq!(app.editor.textarea.lines(), ["hello", "world"]); // unchanged
+        assert_eq!(app.editor.lines(), ["hello", "world"]); // unchanged
         assert!(!app.editor.dirty);
     }
 
@@ -1387,7 +1208,7 @@ mod tests {
         app.handle_key(key(KeyCode::Char('k'))); // k also toggles to Yes
         app.handle_key(key(KeyCode::Enter));
         assert!(app.editor.path.is_none());
-        assert_eq!(app.editor.textarea.lines(), [""]);
+        assert_eq!(app.editor.lines(), [""]);
     }
 
     #[test]
@@ -1598,46 +1419,6 @@ mod tests {
     }
 
     #[test]
-    fn fuzzy_score_matches_subsequences_and_rejects_non_matches() {
-        assert!(fuzzy_score("anm", "app/notes.md").is_some());
-        assert!(fuzzy_score("zzz", "app/notes.md").is_none());
-        // subsequence order matters
-        assert!(fuzzy_score("mn", "notes.md").is_none());
-        // empty query matches everything
-        assert!(fuzzy_score("", "notes.md").is_some());
-    }
-
-    #[test]
-    fn fuzzy_score_is_case_insensitive() {
-        assert!(fuzzy_score("RM", "readme.md").is_some());
-        assert_eq!(
-            fuzzy_score("RM", "readme.md"),
-            fuzzy_score("rm", "README.md")
-        );
-    }
-
-    #[test]
-    fn fuzzy_score_ranks_consecutive_runs_first() {
-        let tight = fuzzy_score("abc", "abc.md").unwrap();
-        let scattered = fuzzy_score("abc", "a1b2c.md").unwrap();
-        assert!(tight < scattered);
-    }
-
-    #[test]
-    fn fuzzy_score_prefers_earlier_matches_when_runs_tie() {
-        let early = fuzzy_score("ab", "ab_xxx.md").unwrap();
-        let late = fuzzy_score("ab", "xxx_ab.md").unwrap();
-        assert!(early < late);
-    }
-
-    #[test]
-    fn fuzzy_score_breaks_remaining_ties_by_shorter_path() {
-        let short = fuzzy_score("ab", "ab.md").unwrap();
-        let long = fuzzy_score("ab", "ab-longer.md").unwrap();
-        assert!(short < long);
-    }
-
-    #[test]
     fn ctrl_p_opens_go_to_file_with_text_files_from_the_whole_root() {
         let root = fixture("gtf-open");
         fs::create_dir_all(root.join("docs")).unwrap();
@@ -1651,6 +1432,7 @@ mod tests {
                 assert!(rels.contains(&"a.md"));
                 assert!(rels.contains(&"docs/deep.md")); // walks subdirs, root-relative
                 assert!(!rels.iter().any(|r| r.contains("bin.dat"))); // text files only
+                assert!(!rels.iter().any(|s| s.contains('\\'))); // no backslashes on any OS
             }
             _ => panic!("expected go-to-file prompt"),
         }
@@ -1707,7 +1489,7 @@ mod tests {
             fs::read_to_string(root.join("a.md")).unwrap(),
             "Xhello\nworld\n"
         );
-        assert_eq!(app.editor.textarea.lines(), ["bee"]);
+        assert_eq!(app.editor.lines(), ["bee"]);
     }
 
     #[test]
@@ -1798,6 +1580,31 @@ mod tests {
         assert_eq!(
             fs::read_to_string(root.join("a.md")).unwrap(),
             "Yhello\nworld\n"
+        );
+    }
+
+    #[test]
+    fn ctrl_q_quits_inside_newfile_prompt() {
+        let mut app = App::new(fixture("prompt-quit-clean"), Config::default()).unwrap();
+        app.handle_key(key(KeyCode::Char('n'))); // open NewFile prompt
+        assert!(matches!(app.prompt, Prompt::NewFile(_)));
+        app.handle_key(ctrl('q')); // Ctrl+Q should quit even inside prompt
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn ctrl_q_saves_and_quits_inside_search_prompt() {
+        let root = fixture("prompt-quit-dirty");
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
+        app.handle_key(key(KeyCode::Enter)); // open a.md
+        app.handle_key(key(KeyCode::Char('Q'))); // make it dirty
+        app.handle_key(ctrl('f')); // open Search prompt (from editor)
+        assert!(matches!(app.prompt, Prompt::Search(_)));
+        app.handle_key(ctrl('q')); // Ctrl+Q should save and quit
+        assert!(app.should_quit);
+        assert_eq!(
+            fs::read_to_string(root.join("a.md")).unwrap(),
+            "Qhello\nworld\n"
         );
     }
 }

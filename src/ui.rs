@@ -3,7 +3,6 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
-use ratatui_textarea::DataCursor;
 
 use crate::app::{App, Focus, Prompt};
 
@@ -87,7 +86,7 @@ fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
         selected,
     } = &app.prompt
     {
-        let matches = crate::app::fuzzy_filter(input, candidates);
+        let matches = crate::fuzzy::fuzzy_filter(input, candidates);
         let sel = (*selected).min(matches.len().saturating_sub(1));
         let visible = matches.len().min(10);
         let width = matches
@@ -287,7 +286,20 @@ fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
     }
     // our renderer: soft wrap + live syntax styling + terminal cursor
     // (only drawn when the editor has focus)
-    crate::render::render_editor(f, app, inner, focused);
+    let cursor = app.editor.cursor();
+    let selection = app.editor.selection_range();
+    let file_kind = crate::highlight::file_kind(app.editor.path.as_deref());
+    let (lines, cache) = app.editor.render_parts();
+    let view = crate::render::EditorView {
+        lines,
+        cursor,
+        selection,
+        search: app.search_highlight.as_deref(),
+        file_kind,
+        scroll: &mut app.editor_scroll,
+        cache,
+    };
+    crate::render::render_editor(f, view, inner, focused);
 }
 
 /// The keys most useful before any file is open, shown centered and dim
@@ -354,20 +366,14 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
                 .editor
                 .path
                 .as_deref()
-                .map(|p| {
-                    p.strip_prefix(app.tree.root())
-                        .unwrap_or(p)
-                        .to_string_lossy()
-                        .into_owned()
-                })
+                .map(|p| crate::fuzzy::rel_display(app.tree.root(), p))
                 .unwrap_or_else(|| "[no file]".into());
             let dirty = if app.editor.dirty { "*" } else { "" };
-            let DataCursor(row, col) = app.editor.textarea.cursor();
+            let (row, col) = app.editor.cursor();
             let mut s = format!("{mode}| {path}{dirty}  {}:{}", row + 1, col + 1);
             if app.editor.path.is_some() {
                 let words: usize = app
                     .editor
-                    .textarea
                     .lines()
                     .iter()
                     .map(|l| l.split_whitespace().count())
