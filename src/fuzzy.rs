@@ -18,6 +18,13 @@ pub(crate) fn rel_display(root: &Path, path: &Path) -> String {
 /// All text files under `root` as (root-relative display path, absolute
 /// path), sorted by relative path, capped at 5000. Respects .gitignore,
 /// skips .git, and includes dotfiles only when `show_hidden` is set.
+///
+/// Deliberately does not use `Tree`'s (path, mtime) -> is_text cache: this
+/// walk runs once per Ctrl+P popup open (a user action), not on a ~2s
+/// timer, so there's no repeated-sniff cost to amortize here. Threading
+/// the cache in from `App` would mean exposing `Tree`'s private cache or
+/// widening its API for a walk that already only sniffs each file once
+/// per popup open.
 pub(crate) fn collect_candidates(root: &Path, show_hidden: bool) -> Vec<(String, PathBuf)> {
     const CAP: usize = 5000;
     let mut out = Vec::new();

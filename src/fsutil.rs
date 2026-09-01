@@ -36,9 +36,26 @@ pub fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
     }
 }
 
+// Test-only call counter so tests can observe whether a sniff actually
+// happened (vs. being served from a cache) without touching real I/O
+// timing. Thread-local: libtest reuses worker threads across tests but
+// never runs two test bodies on one thread at once, so a before/after
+// delta taken within a single test is never perturbed by other tests.
+#[cfg(test)]
+thread_local! {
+    static SNIFF_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn sniff_call_count() -> usize {
+    SNIFF_CALLS.with(|c| c.get())
+}
+
 /// A file is "text" if its first 8KB contain no NUL byte.
 /// Unreadable/missing files are not text.
 pub fn is_text_file(path: &Path) -> bool {
+    #[cfg(test)]
+    SNIFF_CALLS.with(|c| c.set(c.get() + 1));
     let Ok(mut f) = File::open(path) else {
         return false;
     };
