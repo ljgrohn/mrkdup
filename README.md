@@ -10,7 +10,8 @@ bold/italic, inline and fenced code, checkboxes (done items dimmed),
 blockquotes, links, YAML frontmatter — plus HTML tag/attribute/string
 coloring in `.html` files and for inline HTML in markdown. Every
 character stays visible; syntax marks are dimmed, never hidden, so the
-layout never shifts under your cursor.
+layout never shifts under your cursor. Tabs display as 4 spaces, not
+tab-stops.
 
 Until you open a file, the editor pane shows a short key cheat sheet;
 it disappears the moment a file opens.
