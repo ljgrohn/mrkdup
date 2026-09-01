@@ -75,6 +75,87 @@ impl Default for Theme {
 }
 
 impl Theme {
+    /// Dark foreground palette for light terminal backgrounds. Same
+    /// slots as `default`, ANSI colors only — no invented pastel scheme.
+    pub fn light() -> Theme {
+        Theme {
+            name: "light".to_string(),
+            border_focused: Style::default().fg(Color::Blue),
+            border_unfocused: Style::default().add_modifier(Modifier::DIM),
+            popup_border: Style::default().fg(Color::Blue),
+            status_bar: Style::default().add_modifier(Modifier::REVERSED),
+            selection: Style::default().add_modifier(Modifier::REVERSED),
+            prompt_cursor: Style::default().add_modifier(Modifier::REVERSED),
+            welcome: Style::default().add_modifier(Modifier::DIM),
+            tree_open: Style::default().fg(Color::White).bg(Color::Blue),
+            text: Style::default(),
+            mark: Style::default().add_modifier(Modifier::DIM),
+            heading1: Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
+            heading2: Style::default().fg(Color::Blue),
+            heading: Style::default().fg(Color::Magenta),
+            bold: Style::default().add_modifier(Modifier::BOLD),
+            italic: Style::default().add_modifier(Modifier::ITALIC),
+            code: Style::default().fg(Color::Green),
+            checkbox: Style::default().fg(Color::Magenta),
+            done: Style::default().add_modifier(Modifier::DIM),
+            quote: Style::default().fg(Color::Red),
+            link: Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::UNDERLINED),
+            bullet: Style::default().fg(Color::Blue),
+            html_tag: Style::default().fg(Color::Magenta),
+            html_attr: Style::default().fg(Color::Blue),
+            search_match: Style::default().fg(Color::Black).bg(Color::Yellow),
+        }
+    }
+
+    /// Modifiers only, no `Color::` at all. For 8-color terminals,
+    /// screenshots, and "just the text."
+    pub fn mono() -> Theme {
+        let bold = Style::default().add_modifier(Modifier::BOLD);
+        let dim = Style::default().add_modifier(Modifier::DIM);
+        let reversed = Style::default().add_modifier(Modifier::REVERSED);
+        Theme {
+            name: "mono".to_string(),
+            border_focused: bold,
+            border_unfocused: dim,
+            popup_border: bold,
+            status_bar: reversed,
+            selection: reversed,
+            prompt_cursor: reversed,
+            welcome: dim,
+            tree_open: reversed,
+            text: Style::default(),
+            mark: dim,
+            heading1: bold,
+            heading2: Style::default(),
+            heading: Style::default(),
+            bold,
+            italic: Style::default().add_modifier(Modifier::ITALIC),
+            code: dim,
+            checkbox: Style::default(),
+            done: dim,
+            quote: dim,
+            link: Style::default().add_modifier(Modifier::UNDERLINED),
+            bullet: Style::default(),
+            html_tag: Style::default(),
+            html_attr: Style::default(),
+            search_match: reversed,
+        }
+    }
+
+    /// The builtin named `name`, or `Theme::default()` if `name` isn't
+    /// one of the builtins. File-based lookup is a later task.
+    pub fn named(name: &str) -> Theme {
+        match name {
+            "light" => Theme::light(),
+            "mono" => Theme::mono(),
+            _ => Theme::default(),
+        }
+    }
+
     /// Style for one syntax `Kind`, per this theme's palette.
     pub fn syntax(&self, kind: Kind) -> Style {
         match kind {

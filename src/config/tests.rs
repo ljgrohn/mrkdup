@@ -93,6 +93,43 @@ fn duration_helpers_reflect_the_configured_seconds() {
 }
 
 #[test]
+fn theme_key_sets_theme_name() {
+    let (cfg, warnings) = parse("theme = light\n");
+    assert_eq!(cfg.theme_name, "light");
+    assert!(warnings.is_empty());
+}
+
+#[test]
+fn theme_key_rejects_invalid_name_and_keeps_default() {
+    let (cfg, warnings) = parse("theme = nope!\n");
+    assert_eq!(cfg.theme_name, "default");
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("theme"));
+}
+
+#[test]
+fn theme_key_rejects_uppercase_name() {
+    let (cfg, warnings) = parse("theme = Default\n");
+    assert_eq!(cfg.theme_name, "default");
+    assert_eq!(warnings.len(), 1);
+}
+
+#[test]
+fn theme_key_rejects_a_bare_number() {
+    let (cfg, warnings) = parse("theme = 7\n");
+    assert_eq!(cfg.theme_name, "default");
+    assert_eq!(warnings.len(), 1);
+}
+
+#[test]
+fn numeric_keys_still_reject_non_numeric_values_after_key_first_match() {
+    let (cfg, warnings) = parse("tree_width = wide\n");
+    assert_eq!(cfg.tree_width, 30);
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("not a number"));
+}
+
+#[test]
 fn load_reads_xdg_config_home_and_defaults_when_absent() {
     // one test covers both cases so the env var is only touched here
     let dir = std::env::temp_dir().join("mrkdup-config-load");

@@ -88,6 +88,7 @@ clamped into the ranges below.
 tree_width = 30
 side_margin_percent = 5
 autosave_seconds = 10
+theme = default    # default | light | mono
 ```
 
 | Option | Default | Range | Meaning |
@@ -97,6 +98,7 @@ autosave_seconds = 10
 | `top_margin_percent` | 3 | 0–40 | editor breathing room: % of pane height trimmed off the top |
 | `autosave_seconds` | 2 | 1–600 | idle seconds before a dirty buffer autosaves |
 | `tree_refresh_seconds` | 2 | 1–600 | seconds between automatic tree refreshes |
+| `theme` | `default` | `default` \| `light` \| `mono` | `default` (current look), `light` (dark fg for light terminals), `mono` (no color, modifiers only) |
 
 Keybindings are not remappable.
 

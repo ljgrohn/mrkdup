@@ -72,8 +72,8 @@ impl App {
         Ok(App {
             tree: Tree::new(root)?,
             editor: Editor::new(),
+            theme: Theme::named(&config.theme_name),
             config,
-            theme: Theme::default(),
             focus: Focus::Tree,
             tree_visible: true,
             editor_visible: true,

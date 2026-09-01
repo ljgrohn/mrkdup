@@ -49,6 +49,59 @@ fn search_matches_render_with_yellow_background() {
 }
 
 #[test]
+fn light_theme_headings_render_blue_not_cyan() {
+    let root = fixture("heading-light", "# Title\nplain text\n");
+    let cfg = Config {
+        theme_name: "light".into(),
+        ..Config::default()
+    };
+    let mut app = App::new(root, cfg).unwrap();
+    app.handle_key(key(KeyCode::Enter));
+    let text = draw_to_string(&mut app);
+    assert!(text.contains("Title"));
+    assert!(text.contains("Blue"), "heading color missing: {text}");
+}
+
+#[test]
+fn mono_theme_headings_render_with_no_color_but_bold() {
+    let root = fixture("heading-mono", "# Title\nplain text\n");
+    let cfg = Config {
+        theme_name: "mono".into(),
+        ..Config::default()
+    };
+    let mut app = App::new(root, cfg).unwrap();
+    app.handle_key(key(KeyCode::Enter));
+    let text = draw_to_string(&mut app);
+    assert!(text.contains("Title"));
+    assert!(text.contains("BOLD"), "heading bold missing: {text}");
+    for c in ["Cyan", "Green", "Yellow", "Blue", "Magenta", "Red"] {
+        assert!(!text.contains(c), "mono theme leaked color {c}: {text}");
+    }
+}
+
+#[test]
+fn mono_theme_search_match_renders_reversed_not_yellow() {
+    let root = fixture("search-mono", "alpha\nbravo alpha\n");
+    let cfg = Config {
+        theme_name: "mono".into(),
+        ..Config::default()
+    };
+    let mut app = App::new(root, cfg).unwrap();
+    app.handle_key(key(KeyCode::Enter));
+    app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+    for c in "alpha".chars() {
+        app.handle_key(key(KeyCode::Char(c)));
+    }
+    app.handle_key(key(KeyCode::Enter));
+    let text = draw_to_string(&mut app);
+    assert!(text.contains("REVERSED"), "search overlay missing: {text}");
+    assert!(
+        !text.contains("Yellow"),
+        "mono search leaked Yellow: {text}"
+    );
+}
+
+#[test]
 fn selection_renders_reversed() {
     let root = fixture("selection", "abcdef\n");
     let mut app = App::new(root, Config::default()).unwrap();
