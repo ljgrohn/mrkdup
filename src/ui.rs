@@ -286,7 +286,15 @@ fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
     }
     // our renderer: soft wrap + live syntax styling + terminal cursor
     // (only drawn when the editor has focus)
-    crate::render::render_editor(f, app, inner, focused);
+    let view = crate::render::EditorView {
+        lines: app.editor.lines(),
+        cursor: app.editor.cursor(),
+        selection: app.editor.selection_range(),
+        search: app.search_highlight.as_deref(),
+        file_kind: crate::highlight::file_kind(app.editor.path.as_deref()),
+        scroll: &mut app.editor_scroll,
+    };
+    crate::render::render_editor(f, view, inner, focused);
 }
 
 /// The keys most useful before any file is open, shown centered and dim

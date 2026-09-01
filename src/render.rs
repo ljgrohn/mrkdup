@@ -9,38 +9,47 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use crate::app::App;
 use crate::search::find_ci;
 use crate::{highlight, wrap};
 
-pub fn render_editor(f: &mut Frame, app: &mut App, inner: Rect, focused: bool) {
+/// Everything `render_editor` needs to draw one frame of the editor pane.
+/// `ui::draw_editor` gathers this from `Editor` and `App` state, so this
+/// module never has to depend on `App` itself.
+pub struct EditorView<'a> {
+    pub lines: &'a [String],
+    pub cursor: (usize, usize),
+    pub selection: Option<((usize, usize), (usize, usize))>,
+    pub search: Option<&'a str>,
+    pub file_kind: highlight::FileKind,
+    pub scroll: &'a mut usize,
+}
+
+pub fn render_editor(f: &mut Frame, view: EditorView, inner: Rect, focused: bool) {
     let width = inner.width as usize;
     let height = inner.height as usize;
     if width == 0 || height == 0 {
         return;
     }
-    let lines: Vec<String> = app.editor.lines().to_vec();
-    let rows = wrap::layout(&lines, width);
-    let (crow, ccol) = app.editor.cursor();
-    let (cvrow, cx) = wrap::cursor_position(&rows, &lines, (crow, ccol));
-    app.editor_scroll = wrap::scroll_top(
-        app.editor_scroll.min(rows.len().saturating_sub(1)),
-        cvrow,
-        height,
-    );
+    let EditorView {
+        lines,
+        cursor,
+        selection,
+        search,
+        file_kind,
+        scroll,
+    } = view;
+    let rows = wrap::layout(lines, width);
+    let (cvrow, cx) = wrap::cursor_position(&rows, lines, cursor);
+    *scroll = wrap::scroll_top((*scroll).min(rows.len().saturating_sub(1)), cvrow, height);
 
-    let kind = highlight::file_kind(app.editor.path.as_deref());
-    let spans = highlight::highlight(&lines, kind);
-    let selection = app.editor.selection_range();
-    let search: Option<(String, usize)> = app
-        .search_highlight
-        .as_ref()
+    let spans = highlight::highlight(lines, file_kind);
+    let search: Option<(String, usize)> = search
         .filter(|q| !q.is_empty())
-        .map(|q| (q.clone(), q.chars().count()));
+        .map(|q| (q.to_string(), q.chars().count()));
 
     let out: Vec<Line> = rows
         .iter()
-        .skip(app.editor_scroll)
+        .skip(*scroll)
         .take(height)
         .map(|row| {
             let line = &lines[row.line];
@@ -83,7 +92,7 @@ pub fn render_editor(f: &mut Frame, app: &mut App, inner: Rect, focused: bool) {
     f.render_widget(Paragraph::new(out), inner);
     if focused {
         let x = inner.x + cx.min(width.saturating_sub(1)) as u16;
-        let y = inner.y + (cvrow - app.editor_scroll) as u16;
+        let y = inner.y + (cvrow - *scroll) as u16;
         f.set_cursor_position((x, y));
     }
 }
