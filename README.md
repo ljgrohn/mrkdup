@@ -80,7 +80,7 @@ a one-line warning in the status bar.
 
 The format is plain `key = value` lines; a line starting with `#` is a
 comment (inline comments after a value are not supported) and blank
-lines are fine. Values are whole numbers; out-of-range values are
+lines are fine. Numeric values are whole numbers; out-of-range values are
 clamped into the ranges below.
 
 ```ini
@@ -138,6 +138,8 @@ around `on` (`cyan + bold` is a warning, not `cyan+bold` with padding).
 `bright-` applies only to black, red, green, yellow, blue, magenta, and
 cyan — there is no `bright-white`, `bright-gray`, or `bright-grey`.
 
+Beware: `selection = default` or `search_match = default` disables that overlay entirely (it patches nothing), making the selection or search match invisible; use `reverse` for a colorless-but-visible overlay instead.
+
 The settable keys are the `Theme` struct's field names — every pane
 and syntax slot mrkdup paints:
 
@@ -163,6 +165,8 @@ link = #89b4fa+underline
 selection = reverse
 search_match = #1e1e2e on #f9e2af
 ```
+
+Slots are independent — `text` is not inherited by `bold`, `italic`, or `mark`; set those explicitly (e.g., `bold = #cdd6f4+bold`) if you want them to follow `text`.
 
 Keybindings are not remappable.
 

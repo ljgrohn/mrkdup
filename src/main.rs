@@ -36,7 +36,7 @@ fn main() -> io::Result<()> {
     let mut app = app::App::new_with_theme(root, config, theme)?;
     if !warnings.is_empty() {
         app.status = Some(format!(
-            "config: ignored {} line(s) — {}",
+            "config/theme: {} warning(s) — {}",
             warnings.len(),
             warnings[0]
         ));

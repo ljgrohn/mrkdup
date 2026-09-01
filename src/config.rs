@@ -16,8 +16,8 @@ pub struct Config {
     pub autosave_seconds: u64,
     /// Seconds between automatic tree refreshes (1..=600).
     pub tree_refresh_seconds: u64,
-    /// Color theme name: `default`, `light`, or `mono` (unrecognized
-    /// names fall back to `default` at lookup time, not here).
+    /// Builtin color theme (`default`, `light`, `mono`), or the name of
+    /// a file under `$XDG_CONFIG_HOME/mrkdup/themes/`; validated by `valid_theme_name`.
     pub theme_name: String,
 }
 
