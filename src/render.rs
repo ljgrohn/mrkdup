@@ -132,6 +132,7 @@ mod tests {
     use crate::app::{App, Focus};
     use crate::config::Config;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::style::Modifier;
     use ratatui::{backend::TestBackend, Terminal};
     use std::fs;
 
@@ -201,6 +202,71 @@ mod tests {
         // the full line can't fit on one row, so some x-run appears twice
         let rows_with_x = text.lines().filter(|l| l.contains("xxxxx")).count();
         assert!(rows_with_x >= 2, "expected wrapped rows: {text}");
+    }
+
+    #[test]
+    fn styling_stays_correct_across_a_soft_wrap_boundary() {
+        // One long logical line, no spaces, so wrap.rs hard-breaks it
+        // into several rows of a fixed column count. The `**Z**` / `*W*`
+        // / `.` pattern repeats on a period of 9 chars, which the pane's
+        // wrap width (~42-44 cols) doesn't evenly divide, so at least
+        // one row boundary is guaranteed to land inside a Bold or
+        // Italic span -- exactly the case an off-by-one in the D2 span
+        // cursor (reset-on-line-change, forward-only advance) would
+        // paint with a stale or wrong style.
+        let unit = "**Z***W*.";
+        let content = unit.repeat(30);
+        let root = fixture("wrap-styles", &format!("{content}\n"));
+        let mut app = App::new(root, Config::default()).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+
+        let backend = TestBackend::new(80, 16);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        let buf = terminal.backend().buffer();
+
+        // Walk the editor pane (x >= tree_width, y above the status
+        // line) in on-screen order: top-to-bottom, left-to-right. That
+        // is the same order the sentinel characters appear in the
+        // source line, across however many wrapped rows it takes, so
+        // the extracted sequence can be compared directly against the
+        // source without knowing the exact wrap width.
+        let mut seen: Vec<(char, bool, bool)> = Vec::new(); // (char, bold, italic)
+        let mut rows_seen = std::collections::HashSet::new();
+        for y in 0..15u16 {
+            for x in 30..80u16 {
+                if let Some(cell) = buf.cell((x, y)) {
+                    let sym = cell.symbol();
+                    if sym == "Z" || sym == "W" || sym == "." {
+                        let ch = sym.chars().next().unwrap();
+                        let bold = cell.modifier.contains(Modifier::BOLD);
+                        let italic = cell.modifier.contains(Modifier::ITALIC);
+                        seen.push((ch, bold, italic));
+                        rows_seen.insert(y);
+                    }
+                }
+            }
+        }
+
+        assert!(
+            rows_seen.len() >= 2,
+            "expected the line to wrap across multiple rows, saw rows: {rows_seen:?}"
+        );
+
+        let expected: Vec<(char, bool, bool)> = content
+            .chars()
+            .filter(|&c| c == 'Z' || c == 'W' || c == '.')
+            .map(|c| match c {
+                'Z' => ('Z', true, false),
+                'W' => ('W', false, true),
+                _ => ('.', false, false),
+            })
+            .collect();
+
+        assert_eq!(
+            seen, expected,
+            "styling diverged from source order across a wrap boundary"
+        );
     }
 
     #[test]

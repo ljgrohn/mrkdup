@@ -92,7 +92,9 @@ mod tests {
         // index must still be a char offset, not a byte offset (é is a
         // 2-byte char, so a byte-index bug would shift this by one).
         assert_eq!(find_ci("héLLo alpha", "ALPHA", 0), Some(6));
-        // ASCII hay with a non-ASCII query: no match, must not panic.
-        assert_eq!(find_ci("abc", "é", 0), None);
+        // Same shape but the multi-byte char sits earlier in the hay:
+        // "café" is 4 chars / 5 bytes, so a byte-index bug in the
+        // fallback would report 6 here instead of the correct 5.
+        assert_eq!(find_ci("café Meeting", "MEETING", 0), Some(5));
     }
 }
