@@ -6,6 +6,7 @@ mod files;
 mod fsutil;
 mod fuzzy;
 mod highlight;
+mod layout_cache;
 mod render;
 mod search;
 mod tree;

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::fsutil;
+use crate::layout_cache::LayoutCache;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Newline {
@@ -25,6 +26,7 @@ pub struct Editor {
     pub dirty: bool,
     mtime: Option<SystemTime>,
     newline: Newline,
+    layout_cache: LayoutCache,
 }
 
 // rendering (wrap, styling, cursor, search highlight) lives in render.rs;
@@ -60,6 +62,7 @@ impl Editor {
             dirty: false,
             mtime: None,
             newline: Newline::Lf,
+            layout_cache: LayoutCache::new(),
         }
     }
 
@@ -72,16 +75,34 @@ impl Editor {
         self.path = Some(path.to_path_buf());
         self.dirty = false;
         self.mtime = disk_mtime(path);
+        self.layout_cache.invalidate();
         Ok(())
     }
 
     pub fn mark_dirty(&mut self) {
         self.dirty = true;
+        self.layout_cache.invalidate();
     }
 
     /// The buffer's lines, one `String` per line (no line terminators).
     pub fn lines(&self) -> &[String] {
         self.textarea.lines()
+    }
+
+    /// The document lines and the mutable wrap/highlight cache, borrowed
+    /// together from one `&mut self` call so `render.rs` can hold both
+    /// at once without fighting the borrow checker over separate
+    /// accessor calls.
+    pub fn render_parts(&mut self) -> (&[String], &mut LayoutCache) {
+        (self.textarea.lines(), &mut self.layout_cache)
+    }
+
+    /// How many times the wrap/highlight cache has actually recomputed.
+    /// Test-only: lets render tests assert that painting twice without
+    /// an edit doesn't redo the work.
+    #[cfg(test)]
+    pub fn layout_recomputes(&self) -> usize {
+        self.layout_cache.recomputes
     }
 
     /// Cursor position as (row, col), both 0-based.

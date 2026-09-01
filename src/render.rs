@@ -9,6 +9,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
+use crate::layout_cache::LayoutCache;
 use crate::search::find_ci;
 use crate::{highlight, wrap};
 
@@ -22,6 +23,9 @@ pub struct EditorView<'a> {
     pub search: Option<&'a str>,
     pub file_kind: highlight::FileKind,
     pub scroll: &'a mut usize,
+    /// Wrap + highlight cache, owned by `Editor`. Recomputed here only
+    /// when it's stale, the width changed, or the file kind changed.
+    pub cache: &'a mut LayoutCache,
 }
 
 pub fn render_editor(f: &mut Frame, view: EditorView, inner: Rect, focused: bool) {
@@ -37,12 +41,12 @@ pub fn render_editor(f: &mut Frame, view: EditorView, inner: Rect, focused: bool
         search,
         file_kind,
         scroll,
+        cache,
     } = view;
-    let rows = wrap::layout(lines, width);
-    let (cvrow, cx) = wrap::cursor_position(&rows, lines, cursor);
+    let (rows, spans) = cache.ensure(lines, width, file_kind);
+    let (cvrow, cx) = wrap::cursor_position(rows, lines, cursor);
     *scroll = wrap::scroll_top((*scroll).min(rows.len().saturating_sub(1)), cvrow, height);
 
-    let spans = highlight::highlight(lines, file_kind);
     let search: Option<(String, usize)> = search
         .filter(|q| !q.is_empty())
         .map(|q| (q.to_string(), q.chars().count()));
@@ -185,6 +189,23 @@ mod tests {
         // the full line can't fit on one row, so some x-run appears twice
         let rows_with_x = text.lines().filter(|l| l.contains("xxxxx")).count();
         assert!(rows_with_x >= 2, "expected wrapped rows: {text}");
+    }
+
+    #[test]
+    fn painting_twice_without_an_edit_reuses_the_layout_cache() {
+        let root = fixture("cache", "# Title\nplain text\n");
+        let mut app = App::new(root, Config::default()).unwrap();
+        app.handle_key(key(KeyCode::Enter));
+        draw_to_string(&mut app);
+        assert_eq!(app.editor.layout_recomputes(), 1);
+        // a second paint with nothing changed (no edit, no resize) must
+        // not redo wrap+highlight
+        draw_to_string(&mut app);
+        assert_eq!(app.editor.layout_recomputes(), 1);
+        // an actual edit does invalidate and recompute
+        app.handle_key(key(KeyCode::Char('!')));
+        draw_to_string(&mut app);
+        assert_eq!(app.editor.layout_recomputes(), 2);
     }
 
     #[test]

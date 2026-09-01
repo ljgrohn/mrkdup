@@ -286,13 +286,18 @@ fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
     }
     // our renderer: soft wrap + live syntax styling + terminal cursor
     // (only drawn when the editor has focus)
+    let cursor = app.editor.cursor();
+    let selection = app.editor.selection_range();
+    let file_kind = crate::highlight::file_kind(app.editor.path.as_deref());
+    let (lines, cache) = app.editor.render_parts();
     let view = crate::render::EditorView {
-        lines: app.editor.lines(),
-        cursor: app.editor.cursor(),
-        selection: app.editor.selection_range(),
+        lines,
+        cursor,
+        selection,
         search: app.search_highlight.as_deref(),
-        file_kind: crate::highlight::file_kind(app.editor.path.as_deref()),
+        file_kind,
         scroll: &mut app.editor_scroll,
+        cache,
     };
     crate::render::render_editor(f, view, inner, focused);
 }
