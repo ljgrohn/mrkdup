@@ -532,7 +532,15 @@ impl App {
     }
 
     fn prompt_key(&mut self, key: KeyEvent) {
-        if key.modifiers.contains(KeyModifiers::CONTROL) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+        // Handle Ctrl+Q and Ctrl+C first - they should quit even in prompts
+        if ctrl && matches!(key.code, KeyCode::Char('q') | KeyCode::Char('c')) {
+            self.do_quit();
+            return;
+        }
+
+        if ctrl {
             // Ctrl+J/Ctrl+K move the go-to-file selection
             if let Prompt::GoToFile {
                 input,
@@ -1827,5 +1835,30 @@ mod tests {
         let rels: Vec<&str> = candidates.iter().map(|(rel, _)| rel.as_str()).collect();
         assert!(rels.contains(&"notes/keep.md"));
         assert!(!rels.contains(&"notes/debug.log"));
+    }
+
+    #[test]
+    fn ctrl_q_quits_inside_newfile_prompt() {
+        let mut app = App::new(fixture("prompt-quit-clean"), Config::default()).unwrap();
+        app.handle_key(key(KeyCode::Char('n'))); // open NewFile prompt
+        assert!(matches!(app.prompt, Prompt::NewFile(_)));
+        app.handle_key(ctrl('q')); // Ctrl+Q should quit even inside prompt
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn ctrl_q_saves_and_quits_inside_search_prompt() {
+        let root = fixture("prompt-quit-dirty");
+        let mut app = App::new(root.clone(), Config::default()).unwrap();
+        app.handle_key(key(KeyCode::Enter)); // open a.md
+        app.handle_key(key(KeyCode::Char('Q'))); // make it dirty
+        app.handle_key(ctrl('f')); // open Search prompt (from editor)
+        assert!(matches!(app.prompt, Prompt::Search(_)));
+        app.handle_key(ctrl('q')); // Ctrl+Q should save and quit
+        assert!(app.should_quit);
+        assert_eq!(
+            fs::read_to_string(root.join("a.md")).unwrap(),
+            "Qhello\nworld\n"
+        );
     }
 }
