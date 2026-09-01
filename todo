@@ -4,9 +4,15 @@
   YAML frontmatter; marks stay visible, dimmed. Mark-hiding on
   non-cursor lines deliberately deferred — it can layer on later.
 
+- [ ] Harden for v0.1 (review follow-ups) — DO THIS BEFORE SHIPPING
+  Plan: docs/superpowers/plans/2026-08-31-mrkdup-review-followups.md
+  Order: unred Windows CI (slash paths) → preserve CRLF → root
+  gitignore → Ctrl+Q in prompts → [X]/single-undo checkbox → split
+  app.rs (fuzzy/search/checkbox) → cache wrap+highlight. No new
+  features. Mark-hiding still deferred.
+
 - [ ] Ship it properly: crates.io + releases
-  Publish `mrkdup` to crates.io (grabs the name), tag v0.1.0, add a CI
-  badge to the README, and set up cargo-dist (or a release workflow) so
-  tagged releases ship prebuilt binaries for mac/linux/windows.
-
-
+  Blocked on the harden plan above. Then: publish `mrkdup` to
+  crates.io (grabs the name), tag v0.1.0, add a CI badge to the
+  README, and set up cargo-dist (or a release workflow) so tagged
+  releases ship prebuilt binaries for mac/linux/windows.
