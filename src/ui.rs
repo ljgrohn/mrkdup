@@ -87,7 +87,7 @@ fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
         selected,
     } = &app.prompt
     {
-        let matches = crate::app::fuzzy_filter(input, candidates);
+        let matches = crate::fuzzy::fuzzy_filter(input, candidates);
         let sel = (*selected).min(matches.len().saturating_sub(1));
         let visible = matches.len().min(10);
         let width = matches

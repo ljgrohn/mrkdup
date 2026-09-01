@@ -2,6 +2,7 @@ mod app;
 mod config;
 mod editor;
 mod fsutil;
+mod fuzzy;
 mod highlight;
 mod render;
 mod tree;
