@@ -4,13 +4,14 @@
 //! cursor, selection, and search-match highlighting.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::layout_cache::LayoutCache;
 use crate::search::find_ci;
+use crate::theme::Theme;
 use crate::{highlight, wrap};
 
 /// Everything `render_editor` needs to draw one frame of the editor pane.
@@ -26,6 +27,7 @@ pub struct EditorView<'a> {
     /// Wrap + highlight cache, owned by `Editor`. Recomputed here only
     /// when it's stale, the width changed, or the file kind changed.
     pub cache: &'a mut LayoutCache,
+    pub theme: &'a Theme,
 }
 
 pub fn render_editor(f: &mut Frame, view: EditorView, inner: Rect, focused: bool) {
@@ -42,6 +44,7 @@ pub fn render_editor(f: &mut Frame, view: EditorView, inner: Rect, focused: bool
         file_kind,
         scroll,
         cache,
+        theme,
     } = view;
     let (rows, spans) = cache.ensure(lines, width, file_kind);
     let (cvrow, cx) = wrap::cursor_position(rows, lines, cursor);
@@ -87,13 +90,13 @@ pub fn render_editor(f: &mut Frame, view: EditorView, inner: Rect, focused: bool
                 let mut st = line_spans
                     .get(span_i)
                     .filter(|s| ci >= s.start && ci < s.end)
-                    .map(|s| highlight::style(s.kind))
+                    .map(|s| theme.syntax(s.kind))
                     .unwrap_or_default();
                 if match_ranges.iter().any(|&(a, b)| ci >= a && ci < b) {
-                    st = st.bg(Color::Yellow).fg(Color::Black);
+                    st = st.patch(theme.search_match);
                 }
                 if in_selection(selection, row.line, ci) {
-                    st = st.add_modifier(Modifier::REVERSED);
+                    st = st.patch(theme.selection);
                 }
                 let piece = if ch == '\t' {
                     "    ".to_string()

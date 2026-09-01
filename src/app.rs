@@ -7,6 +7,7 @@ use ratatui_textarea::{CursorMove, Input};
 
 use crate::config::Config;
 use crate::editor::{Editor, SaveOutcome};
+use crate::theme::Theme;
 use crate::tree::Tree;
 
 pub enum Focus {
@@ -47,6 +48,7 @@ pub struct App {
     pub tree: Tree,
     pub editor: Editor,
     pub config: Config,
+    pub theme: Theme,
     pub focus: Focus,
     pub tree_visible: bool,
     pub editor_visible: bool,
@@ -71,6 +73,7 @@ impl App {
             tree: Tree::new(root)?,
             editor: Editor::new(),
             config,
+            theme: Theme::default(),
             focus: Focus::Tree,
             tree_visible: true,
             editor_visible: true,

@@ -1,16 +1,17 @@
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 use crate::app::{App, Focus, Prompt};
+use crate::theme::Theme;
 
-fn border_style(focused: bool) -> Style {
+fn border_style(focused: bool, theme: &Theme) -> Style {
     if focused {
-        Style::default().fg(Color::Cyan)
+        theme.border_focused
     } else {
-        Style::default().add_modifier(Modifier::DIM)
+        theme.border_unfocused
     }
 }
 
@@ -48,35 +49,36 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     }
 }
 
-fn popup_block(title: &str) -> Block<'_> {
+fn popup_block<'a>(title: &'a str, theme: &Theme) -> Block<'a> {
     Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan))
+        .border_style(theme.popup_border)
         .title(title)
 }
 
 /// A one-line text-input popup: the typed input followed by a block cursor.
-fn draw_input_popup(f: &mut Frame, area: Rect, title: &str, input: &str) {
+fn draw_input_popup(f: &mut Frame, area: Rect, title: &str, input: &str, theme: &Theme) {
     let width = (input.len() as u16 + 8).max(40);
     let popup = centered_rect(width, 3, area);
     f.render_widget(Clear, popup);
-    let block = popup_block(title);
+    let block = popup_block(title, theme);
     let inner = block.inner(popup);
     f.render_widget(block, popup);
     let line = Line::from(vec![
         ratatui::text::Span::raw(format!(" {input}")),
-        ratatui::text::Span::styled(" ", Style::default().add_modifier(Modifier::REVERSED)),
+        ratatui::text::Span::styled(" ", theme.prompt_cursor),
     ]);
     f.render_widget(Paragraph::new(line), inner);
 }
 
 fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
     if let Prompt::Help = &app.prompt {
         let lines = key_lines();
         let width = lines.iter().map(|l| l.width()).max().unwrap_or(0) as u16 + 4;
         let popup = centered_rect(width, lines.len() as u16 + 2, area);
         f.render_widget(Clear, popup);
-        let block = popup_block(" Keys ");
+        let block = popup_block(" Keys ", theme);
         let inner = block.inner(popup);
         f.render_widget(block, popup);
         // left-aligned so the key column lines up; one cell of padding
@@ -88,13 +90,13 @@ fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
         f.render_widget(Paragraph::new(lines), padded);
     }
     if let Prompt::NewFile(input) = &app.prompt {
-        draw_input_popup(f, area, " New file ", input);
+        draw_input_popup(f, area, " New file ", input, theme);
     }
     if let Prompt::Search(input) = &app.prompt {
-        draw_input_popup(f, area, " Search ", input);
+        draw_input_popup(f, area, " Search ", input, theme);
     }
     if let Prompt::Rename { input, .. } = &app.prompt {
-        draw_input_popup(f, area, " Rename ", input);
+        draw_input_popup(f, area, " Rename ", input, theme);
     }
     if let Prompt::GoToFile {
         input,
@@ -117,12 +119,12 @@ fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
         let height = (visible as u16 + 3).min(area.height); // borders + input line
         let popup = centered_rect(width, height, area);
         f.render_widget(Clear, popup);
-        let block = popup_block(" Go to file ");
+        let block = popup_block(" Go to file ", theme);
         let inner = block.inner(popup);
         f.render_widget(block, popup);
         let mut lines = vec![Line::from(vec![
             ratatui::text::Span::raw(format!(" {input}")),
-            ratatui::text::Span::styled(" ", Style::default().add_modifier(Modifier::REVERSED)),
+            ratatui::text::Span::styled(" ", theme.prompt_cursor),
         ])];
         // keep the selection visible if it scrolls past the shown window
         let top = sel.saturating_sub(visible.saturating_sub(1));
@@ -164,7 +166,7 @@ fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
         let height = (names.len() as u16 + 2).min(area.height);
         let popup = centered_rect(width.max(30), height, area);
         f.render_widget(Clear, popup);
-        let block = popup_block(&title);
+        let block = popup_block(&title, theme);
         let inner = block.inner(popup);
         f.render_widget(block, popup);
         // keep the selection visible if the list is taller than the popup
@@ -189,7 +191,7 @@ fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         let popup = centered_rect((name.len() as u16 + 16).max(30), 5, area);
         f.render_widget(Clear, popup);
-        let block = popup_block(" Delete file? ");
+        let block = popup_block(" Delete file? ", theme);
         let inner = block.inner(popup);
         f.render_widget(block, popup);
         let on = Style::default().add_modifier(Modifier::REVERSED);
@@ -218,7 +220,7 @@ fn draw_tree(f: &mut Frame, app: &mut App, area: Rect) {
     let tree_focused = matches!(app.focus, Focus::Tree);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(border_style(tree_focused))
+        .border_style(border_style(tree_focused, &app.theme))
         .title(root_name);
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -232,6 +234,7 @@ fn draw_tree(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     let open_marker = open_marker_index(app.tree.rows(), app.editor.path.as_deref());
+    let tree_open_style = app.theme.tree_open;
     let lines: Vec<Line> = app
         .tree
         .rows()
@@ -251,9 +254,9 @@ fn draw_tree(f: &mut Frame, app: &mut App, area: Rect) {
             };
             let text = format!("{}{}{}", "  ".repeat(row.depth), marker, row.name);
             let mut line = Line::from(text);
-            // blue = the open document (or the folder hiding it)
+            // the open document (or the folder hiding it)
             let mut style = if Some(i) == open_marker {
-                Style::default().bg(Color::Blue).fg(Color::White)
+                tree_open_style
             } else {
                 Style::default()
             };
@@ -289,7 +292,7 @@ fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
     let focused = matches!(app.focus, Focus::Editor);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(border_style(focused));
+        .border_style(border_style(focused, &app.theme));
     let inner = with_side_margins(
         block.inner(area),
         app.config.side_margin_percent,
@@ -297,7 +300,7 @@ fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
     );
     f.render_widget(block, area);
     if app.editor.path.is_none() {
-        draw_welcome(f, inner);
+        draw_welcome(f, inner, &app.theme);
         return;
     }
     // our renderer: soft wrap + live syntax styling + terminal cursor
@@ -314,6 +317,7 @@ fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
         file_kind,
         scroll: &mut app.editor_scroll,
         cache,
+        theme: &app.theme,
     };
     crate::render::render_editor(f, view, inner, focused);
 }
@@ -343,7 +347,7 @@ fn key_lines() -> Vec<Line<'static>> {
 
 /// The cheat sheet, shown centered and dim in the editor pane until the
 /// first file opens.
-fn draw_welcome(f: &mut Frame, area: Rect) {
+fn draw_welcome(f: &mut Frame, area: Rect, theme: &Theme) {
     let mut lines = vec![
         Line::from("mrkdup").alignment(Alignment::Center),
         Line::from(""),
@@ -351,10 +355,7 @@ fn draw_welcome(f: &mut Frame, area: Rect) {
     lines.extend(key_lines());
     let width = lines.iter().map(|l| l.width()).max().unwrap_or(0) as u16;
     let rect = centered_rect(width, lines.len() as u16, area);
-    f.render_widget(
-        Paragraph::new(lines).style(Style::default().add_modifier(Modifier::DIM)),
-        rect,
-    );
+    f.render_widget(Paragraph::new(lines).style(theme.welcome), rect);
 }
 
 /// Inset a rect by `side_pct`% of its width on each side and `top_pct`%
@@ -414,10 +415,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
             s
         }
     };
-    f.render_widget(
-        Paragraph::new(text).style(Style::default().add_modifier(Modifier::REVERSED)),
-        area,
-    );
+    f.render_widget(Paragraph::new(text).style(app.theme.status_bar), area);
 }
 
 #[cfg(test)]

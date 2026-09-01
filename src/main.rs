@@ -9,6 +9,7 @@ mod highlight;
 mod layout_cache;
 mod render;
 mod search;
+mod theme;
 mod tree;
 mod ui;
 mod wrap;

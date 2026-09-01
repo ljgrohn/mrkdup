@@ -2,8 +2,6 @@
 //! char-range spans per logical line; all characters stay visible (marks
 //! are dimmed, never hidden), so layout is untouched.
 
-use ratatui::style::{Color, Modifier, Style};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Text,
@@ -51,32 +49,6 @@ pub fn file_kind(path: Option<&std::path::Path>) -> FileKind {
             FileKind::Html
         }
         _ => FileKind::Markdown,
-    }
-}
-
-pub fn style(kind: Kind) -> Style {
-    match kind {
-        Kind::Text => Style::default(),
-        Kind::Mark | Kind::LinkUrl | Kind::HtmlComment => {
-            Style::default().add_modifier(Modifier::DIM)
-        }
-        Kind::Heading(1) => Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-        Kind::Heading(2) => Style::default().fg(Color::Cyan),
-        Kind::Heading(_) => Style::default().fg(Color::Blue),
-        Kind::Bold => Style::default().add_modifier(Modifier::BOLD),
-        Kind::Italic => Style::default().add_modifier(Modifier::ITALIC),
-        Kind::CodeInline | Kind::CodeBlock | Kind::HtmlString => Style::default().fg(Color::Green),
-        Kind::CheckboxOpen => Style::default().fg(Color::Magenta),
-        Kind::DoneText => Style::default().add_modifier(Modifier::DIM),
-        Kind::Quote => Style::default().fg(Color::Yellow),
-        Kind::LinkText => Style::default()
-            .fg(Color::Blue)
-            .add_modifier(Modifier::UNDERLINED),
-        Kind::Bullet => Style::default().fg(Color::Cyan),
-        Kind::HtmlTag => Style::default().fg(Color::Magenta),
-        Kind::HtmlAttr | Kind::FmKey => Style::default().fg(Color::Cyan),
     }
 }
 
