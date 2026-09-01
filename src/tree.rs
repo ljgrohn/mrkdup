@@ -22,6 +22,16 @@ pub struct Tree {
     /// mtime matches what's stored. Sniffing a file opens and reads up to
     /// 8KB of it, which is wasteful to redo on every ~2s tree refresh when
     /// nothing changed. See `cached_is_text_file`.
+    ///
+    /// Staleness window: validity is judged purely by mtime equality, with
+    /// no separate expiry. On a filesystem with coarse mtime resolution
+    /// (FAT32/exFAT ~2s ticks, some network mounts), a file that's
+    /// rewritten across the text/binary boundary within the same mtime
+    /// tick as the cached read will keep serving the stale verdict — not
+    /// just until the next refresh, but indefinitely, until some *later*
+    /// write produces a mtime that actually differs from what's cached.
+    /// Accepted as inherent to the mandated mtime-cache design rather than
+    /// worked around.
     text_cache: HashMap<PathBuf, (SystemTime, bool)>,
 }
 
@@ -259,6 +269,11 @@ pub(crate) fn is_root_ignored(
 /// `metadata` call also skips the cache write, since there's no mtime to
 /// key it on — such a path (e.g. a race with deletion) will simply be
 /// re-sniffed (and just as unreadable) next time.
+///
+/// See the staleness-window note on `Tree::text_cache`: mtime equality is
+/// the only validity check, so a coarse-resolution filesystem can serve a
+/// stale verdict indefinitely if a text/binary swap lands within one
+/// mtime tick of the cached read.
 fn cached_is_text_file(path: &Path, cache: &mut HashMap<PathBuf, (SystemTime, bool)>) -> bool {
     let Ok(mtime) = std::fs::metadata(path).and_then(|m| m.modified()) else {
         return crate::fsutil::is_text_file(path);
@@ -531,8 +546,13 @@ mod tests {
         let root = fixture("cache-bump");
         let mut t = Tree::new(root.clone()).unwrap();
         // Rewrite a.md's contents without changing its name, forcing a
-        // new mtime (macOS/APFS mtime resolution is sub-millisecond, but
-        // sleep a touch to be safe on coarser filesystems too).
+        // new mtime. 20ms is plenty of margin on the sub-millisecond
+        // mtime resolution of APFS/ext4-class filesystems, which is what
+        // this test (and CI) actually runs on — it is not a guarantee on
+        // coarser-resolution filesystems (FAT32/exFAT ~2s ticks, some
+        // network mounts), where this same tick could in principle still
+        // land within the old mtime. See the staleness-window note on
+        // `Tree::text_cache` for that known limit of the cache itself.
         std::thread::sleep(std::time::Duration::from_millis(20));
         fs::write(root.join("a.md"), "changed\n").unwrap();
 
