@@ -5,6 +5,7 @@ mod fsutil;
 mod fuzzy;
 mod highlight;
 mod render;
+mod search;
 mod tree;
 mod ui;
 mod wrap;

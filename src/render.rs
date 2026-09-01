@@ -10,7 +10,8 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 use ratatui_textarea::DataCursor;
 
-use crate::app::{find_ci, App};
+use crate::app::App;
+use crate::search::find_ci;
 use crate::{highlight, wrap};
 
 pub fn render_editor(f: &mut Frame, app: &mut App, inner: Rect, focused: bool) {

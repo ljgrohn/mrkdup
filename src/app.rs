@@ -706,46 +706,24 @@ impl App {
         self.search_highlight = Some(query.to_string());
         let DataCursor(crow, ccol) = self.editor.textarea.cursor();
         let lines: Vec<String> = self.editor.textarea.lines().to_vec();
-        let n = lines.len();
-        for i in 0..=n {
-            let row = (crow + i) % n;
-            let hay = &lines[row];
-            let from_char = if i == 0 { ccol + 1 } else { 0 };
-            if let Some(cpos) = find_ci(hay, query, from_char) {
+        self.last_search = query.to_string();
+        match crate::search::next(&lines, (crow, ccol), query) {
+            Some((row, cpos)) => {
                 if row > u16::MAX as usize || cpos > u16::MAX as usize {
                     // Jump takes u16; truncating would land on the wrong line
                     self.status = Some("match is beyond line 65535 — cannot jump".into());
-                    self.last_search = query.to_string();
                     return;
                 }
                 self.editor.textarea.cancel_selection();
                 self.editor
                     .textarea
                     .move_cursor(CursorMove::Jump(row as u16, cpos as u16));
-                self.last_search = query.to_string();
-                return;
+            }
+            None => {
+                self.status = Some(format!("not found: {query}"));
             }
         }
-        self.status = Some(format!("not found: {query}"));
-        self.last_search = query.to_string();
     }
-}
-
-/// Case-insensitive literal find: the char index of the first match of
-/// `query` in `hay` at or after char index `from_char`.
-pub(crate) fn find_ci(hay: &str, query: &str, from_char: usize) -> Option<usize> {
-    let h: Vec<char> = hay.chars().collect();
-    let q: Vec<char> = query.chars().collect();
-    if q.is_empty() || h.len() < q.len() {
-        return None;
-    }
-    let ci_eq = |a: &char, b: &char| a.to_lowercase().eq(b.to_lowercase());
-    (from_char..=h.len() - q.len()).find(|&start| {
-        h[start..start + q.len()]
-            .iter()
-            .zip(&q)
-            .all(|(a, b)| ci_eq(a, b))
-    })
 }
 
 /// The checkbox-toggled form of `line`, indentation preserved.
@@ -768,6 +746,7 @@ fn toggle_checkbox_line(line: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::search::find_ci;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::fs;
 
@@ -1104,15 +1083,6 @@ mod tests {
         // ...and Ctrl+G wraps around to the capitalized one
         app.handle_key(ctrl('g'));
         assert_eq!(app.editor.textarea.cursor(), (0, 0));
-    }
-
-    #[test]
-    fn find_ci_handles_unicode_and_offsets() {
-        assert_eq!(find_ci("héLLo héllo", "Éllo", 0), Some(1));
-        assert_eq!(find_ci("héLLo héllo", "Éllo", 2), Some(7));
-        assert_eq!(find_ci("abc", "zzz", 0), None);
-        assert_eq!(find_ci("abc", "", 0), None);
-        assert_eq!(find_ci("ab", "abc", 0), None);
     }
 
     #[test]
