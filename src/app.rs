@@ -201,30 +201,11 @@ impl App {
     }
 
     fn move_file(&mut self, src: PathBuf, dest_dir: PathBuf) {
-        let Some(name) = src.file_name() else { return };
-        let target = dest_dir.join(name);
-        if target == src {
-            self.status = Some("already there".into());
-            return;
+        match crate::files::move_to(&mut self.tree, &mut self.editor, &src, &dest_dir) {
+            Ok(Some(status)) => self.status = Some(status),
+            Ok(None) => {}
+            Err(e) => self.status = Some(e),
         }
-        if target.exists() {
-            self.status = Some("a file with that name is already there".into());
-            return;
-        }
-        if let Err(e) = std::fs::rename(&src, &target) {
-            self.status = Some(format!("move failed: {e}"));
-            return;
-        }
-        if self.editor.path.as_deref() == Some(src.as_path()) {
-            self.editor.path = Some(target.clone());
-        }
-        self.tree.refresh();
-        let shown = target
-            .strip_prefix(self.tree.root())
-            .unwrap_or(&target)
-            .to_string_lossy()
-            .into_owned();
-        self.status = Some(format!("moved to {shown}"));
     }
 
     fn start_rename(&mut self) {
@@ -248,34 +229,11 @@ impl App {
 
     /// Rename `src` to `name` within its own directory.
     fn submit_rename(&mut self, src: &std::path::Path, name: &str) {
-        if name.is_empty() || name.contains('/') || name == ".." {
-            self.status = Some("invalid file name".into());
-            return;
+        match crate::files::rename(&mut self.tree, &mut self.editor, src, name) {
+            Ok(Some(status)) => self.status = Some(status),
+            Ok(None) => {}
+            Err(e) => self.status = Some(e),
         }
-        let Some(dir) = src.parent() else { return };
-        let target = dir.join(name);
-        if target == src {
-            return; // unchanged
-        }
-        // on case-insensitive filesystems (macOS default) a case-only
-        // rename makes target "exist" — but it's the same file, allow it
-        let same_file = target.exists()
-            && std::fs::canonicalize(&target).ok() == std::fs::canonicalize(src).ok();
-        if target.exists() && !same_file {
-            self.status = Some("a file with that name already exists".into());
-            return;
-        }
-        if let Err(e) = std::fs::rename(src, &target) {
-            self.status = Some(format!("rename failed: {e}"));
-            return;
-        }
-        if self.editor.path.as_deref() == Some(src) {
-            self.editor.path = Some(target.clone());
-        }
-        // refresh tracks selection by the old (gone) path, so reselect
-        self.tree.refresh();
-        self.tree.select_path(&target);
-        self.status = Some(format!("renamed to {name}"));
     }
 
     fn open_go_to_file(&mut self) {
@@ -302,17 +260,16 @@ impl App {
     }
 
     fn delete_file(&mut self, path: PathBuf) {
-        if let Err(e) = std::fs::remove_file(&path) {
-            self.status = Some(format!("delete failed: {e}"));
-            return;
+        let was_open = self.editor.path.as_deref() == Some(path.as_path());
+        match crate::files::delete(&mut self.tree, &mut self.editor, &path) {
+            Ok(status) => {
+                self.status = Some(status);
+                if was_open {
+                    self.last_edit = None;
+                }
+            }
+            Err(e) => self.status = Some(e),
         }
-        if self.editor.path.as_deref() == Some(path.as_path()) {
-            self.editor = Editor::new();
-            self.last_edit = None;
-        }
-        self.tree.refresh();
-        let name = path.file_name().unwrap_or_default().to_string_lossy();
-        self.status = Some(format!("deleted {name}"));
     }
 
     fn open_selected(&mut self) {
@@ -664,33 +621,10 @@ impl App {
     }
 
     fn submit_new_file(&mut self, name: &str) {
-        let name = name.trim();
-        if name.is_empty() || name.starts_with('/') || name.split('/').any(|part| part == "..") {
-            self.status = Some("invalid file name".into());
-            return;
+        match crate::files::create(&mut self.tree, name) {
+            Ok(path) => self.open_file(path),
+            Err(e) => self.status = Some(e),
         }
-        let base = match self.tree.selected_row() {
-            Some(r) if r.is_dir => r.path.clone(),
-            Some(r) => r.path.parent().unwrap_or(self.tree.root()).to_path_buf(),
-            None => self.tree.root().to_path_buf(),
-        };
-        let path = base.join(name);
-        if path.exists() {
-            self.status = Some("file already exists".into());
-            return;
-        }
-        if let Some(parent) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                self.status = Some(format!("create failed: {e}"));
-                return;
-            }
-        }
-        if let Err(e) = crate::fsutil::atomic_write(&path, b"") {
-            self.status = Some(format!("create failed: {e}"));
-            return;
-        }
-        self.tree.refresh();
-        self.open_file(path);
     }
 
     /// Literal, case-insensitive, wraps around; starts one char after the cursor.
