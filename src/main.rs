@@ -1,4 +1,5 @@
 mod app;
+mod checkbox;
 mod config;
 mod editor;
 mod fsutil;

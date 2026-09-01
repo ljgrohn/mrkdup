@@ -457,7 +457,7 @@ impl App {
         let Some(old) = self.editor.textarea.lines().get(row).cloned() else {
             return;
         };
-        let new = toggle_checkbox_line(&old);
+        let new = crate::checkbox::toggle_checkbox_line(&old);
         // Head, not Jump(row as u16, _): u16 would truncate past line 65535
         self.editor.textarea.move_cursor(CursorMove::Head);
         if !old.is_empty() {
@@ -482,11 +482,7 @@ impl App {
         let Some(line) = self.editor.textarea.lines().get(row) else {
             return false;
         };
-        let before: Vec<char> = line.chars().take(col).collect();
-        col >= 2
-            && before[col - 1] == '-'
-            && before[col - 2] == '-'
-            && (col == 2 || before[col - 3] != '-')
+        crate::checkbox::trigger_armed(line, col)
     }
 
     fn note_edit(&mut self) {
@@ -723,23 +719,6 @@ impl App {
                 self.status = Some(format!("not found: {query}"));
             }
         }
-    }
-}
-
-/// The checkbox-toggled form of `line`, indentation preserved.
-fn toggle_checkbox_line(line: &str) -> String {
-    let indent_end = line.len() - line.trim_start().len();
-    let (indent, rest) = line.split_at(indent_end);
-    if let Some(tail) = rest.strip_prefix("- [ ]") {
-        format!("{indent}- [x]{tail}")
-    } else if let Some(tail) = rest.strip_prefix("- [x]") {
-        format!("{indent}- [ ]{tail}")
-    } else if let Some(tail) = rest.strip_prefix("- [X]") {
-        format!("{indent}- [ ]{tail}")
-    } else if let Some(tail) = rest.strip_prefix("- ") {
-        format!("{indent}- [ ] {tail}")
-    } else {
-        format!("{indent}- [ ] {rest}")
     }
 }
 
