@@ -8,6 +8,7 @@ repository = "https://github.com/ljgrohn/mrkdup"
 readme = "README.md"
 keywords = ["markdown", "editor", "tui", "terminal"]
 categories = ["command-line-utilities", "text-editors"]
+exclude = ["docs/", "todo", ".github/", "npm/", ".claude/", ".superpowers/"]
 
 [dependencies]
 ratatui = "0.30"

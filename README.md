@@ -1,5 +1,9 @@
 # mrkdup
 
+[![CI](https://github.com/ljgrohn/mrkdup/actions/workflows/ci.yml/badge.svg)](https://github.com/ljgrohn/mrkdup/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/mrkdup.svg)](https://crates.io/crates/mrkdup)
+[![npm](https://img.shields.io/npm/v/mrkdup.svg)](https://www.npmjs.com/package/mrkdup)
+
 A terminal markdown editor: a collapsible file tree on the left, a
 soft-wrapping raw-text editor on the right. A thin, fast wrapper around
 plain files — it autosaves, writes atomically, and picks up external
@@ -28,9 +32,17 @@ position, and a live word count for the open file.
 
 ## Install
 
+Any of:
+
 ```sh
-cargo install --path .
+cargo install mrkdup        # from crates.io
+npm install -g mrkdup       # npm wrapper; downloads the prebuilt binary for your platform
+cargo install --path .      # from a checkout
 ```
+
+Prebuilt binaries for macOS (Apple silicon and Intel), Linux (x86_64
+and arm64, static musl builds), and Windows are attached to each
+[GitHub release](https://github.com/ljgrohn/mrkdup/releases).
 
 ## Use
 

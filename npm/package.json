@@ -1,0 +1,40 @@
+{
+  "name": "mrkdup",
+  "version": "0.1.0",
+  "description": "A terminal markdown editor with a file tree and soft wrap (prebuilt binary wrapper)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ljgrohn/mrkdup.git"
+  },
+  "homepage": "https://github.com/ljgrohn/mrkdup#readme",
+  "keywords": [
+    "markdown",
+    "editor",
+    "tui",
+    "terminal"
+  ],
+  "bin": {
+    "mrkdup": "bin/mrkdup.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "files": [
+    "bin",
+    "install.js",
+    "README.md"
+  ],
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

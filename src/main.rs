@@ -27,8 +27,25 @@ use crossterm::event::{
 };
 use crossterm::execute;
 
+const USAGE: &str = "\
+mrkdup — a terminal markdown editor with a file tree and soft wrap
+
+Usage: mrkdup [directory]        open the tree at directory (default: .)
+       mrkdup --version | -V     print the version
+       mrkdup --help | -h        this text
+
+Keys: press ? inside the app for the cheat sheet.";
+
 fn main() -> io::Result<()> {
-    let root = match env::args().nth(1) {
+    let root = match env::args().nth(1).as_deref() {
+        Some("--version" | "-V") => {
+            println!("mrkdup {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+        Some("--help" | "-h") => {
+            println!("{USAGE}");
+            return Ok(());
+        }
         Some(p) => PathBuf::from(p),
         None => env::current_dir()?,
     };
