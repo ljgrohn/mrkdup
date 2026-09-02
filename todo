@@ -4,7 +4,7 @@
   YAML frontmatter; marks stay visible, dimmed. Mark-hiding on
   non-cursor lines deliberately deferred — it can layer on later.
 
-- [ ] Harden for v0.1 (review follow-ups) — DO THIS BEFORE SHIPPING
+- [x] Harden for v0.1 (review follow-ups) — DO THIS BEFORE SHIPPING
   Plan: docs/superpowers/plans/2026-08-31-mrkdup-review-followups.md
   Order: unred Windows CI (slash paths) → preserve CRLF → root
   gitignore → Ctrl+Q in prompts → [X]/single-undo checkbox → split
@@ -17,8 +17,44 @@
   README, and set up cargo-dist (or a release workflow) so tagged
   releases ship prebuilt binaries for mac/linux/windows.
 
-- [ ] Themes (after harden Package C; not a v0.1 blocker)
+- [x] Themes (after harden Package C; not a v0.1 blocker)
   Plan: docs/superpowers/plans/2026-08-31-mrkdup-themes.md
   Extract Theme (only Color:: lives there) → theme = default|light|mono
   → user overlay file + named themes/<name>. No new keys, no new
   crates, no per-project config, no live reload.
+
+
+- [x] need to remove the find highlights after user starts to type
+  (any edit clears search_highlight; Ctrl+G brings it back)
+
+- [x] Mouse click to land cursor
+  (app owns the mouse: click in the editor lands the cursor, click in
+  the tree opens the row, wheel moves 3 lines/rows)
+
+- [x] Highlight only ever grabs the editor screen, not the file tree
+  (drag is clamped to the editor rect; past the top/bottom edge it
+  scrolls one row per event)
+
+- [x] Mouse selection
+  (release copies via OSC 52 plus pbcopy / wl-copy / xclip when
+  present; Shift+drag still reaches the terminal's native selection)
+
+- [x] Tabs. 
+  (tab bar atop the editor pane; Enter/click opens in a new tab or
+  switches to the existing one; Ctrl+W / × close; Opt+H/L cycle,
+  Opt+1-9 jump; theme keys tab_active / tab_inactive)
+
+- [x] ctrl w closes the window
+  (implemented as "close the open file": autosave, back to the launch
+  page, tree focused; disk conflict keeps it open)
+
+
+- [x] Settings popup — review follow-ups (branch merged to main as ea3f5a1)
+  Review of 90eaa79..363bec0: no critical or functional bugs; two should-fix,
+  a few polish items. Spec: docs/superpowers/specs/2026-09-01-settings-popup-design.md
+  - [x] Spec "Not doing" (lines ~297-304) still says "no numeric rows" / "only writes theme" — contradicted by the side_padding addendum; strike/annotate. Persistence section still names rewrite_theme_line/save_theme_name_to (now rewrite_key_line/save_key_to) (done in ea3f5a1)
+  - [x] Add a render test that draws the Settings popup with both rows and asserts the `›` sits one cell left of the right border (pins the .chars().count() alignment fix; second row is never rendered in any test) (done in ea3f5a1)
+  - [x] Nice: pass config_dir into App::new_with_theme instead of reading env inside the constructor (only convention stops a test from hitting the real ~/.config)
+  - [x] Nice: popup width uses the current value, not the widest choice — long user theme names make it resize while cycling (ui.rs draw_popup Settings)
+  - [x] Nice: README `s` key row says only "Esc closes" — Enter and s also close (done in ea3f5a1)
+  - [x] Note: save_key_to normalises CRLF configs to LF on first write; atomic_write resets file mode (pre-existing). Acceptable, just be aware
