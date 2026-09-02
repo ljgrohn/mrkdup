@@ -1,4 +1,4 @@
-# mrkdup settings popup + `firmitas` theme
+# mrkdup settings popup + `firmitas` and `tokyonight` themes
 
 **Date:** 2026-09-01
 **Status:** approved in chat, awaiting spec review
@@ -13,8 +13,9 @@ live, and have the choice written back to the config file. The popup is
 a generic *settings list* so later options slot in as new rows; today it
 has exactly one row.
 
-Also ship the Omarchy *Firmitas Utilitas Venustas* palette as a fourth
-builtin, `firmitas`.
+Also ship two more builtins: the Omarchy *Firmitas Utilitas Venustas*
+palette as `firmitas`, and *Tokyo Night* (the standard "night" variant)
+as `tokyonight`.
 
 This reverses two lines of the themes plan on purpose: "no theme picker
 popup" and "no live reload". Everything else in that plan still holds
@@ -24,8 +25,9 @@ remapping).
 ## What stays true
 
 - Terminal default background is the canvas. No builtin paints a
-  full-pane background; `firmitas` sets foregrounds only and expects the
-  Omarchy terminal background (`#0c1928`) underneath.
+  full-pane background; `firmitas` and `tokyonight` set foregrounds only
+  and expect their own terminal background (`#0c1928` / `#1a1b26`)
+  underneath.
 - `Color::` lives only in `src/theme.rs`. The popup uses theme slots.
 - Config is `key = value`, never fails, unknown keys warn. The writer
   must not lose comments, blank lines, or other keys.
@@ -73,14 +75,14 @@ Any other key is ignored.
 ```rust
 pub struct SettingRow {
     pub name: &'static str,     // "theme"
-    pub choices: Vec<String>,   // ["default","light","mono","firmitas", <files…>]
+    pub choices: Vec<String>,   // ["default","light","mono","firmitas","tokyonight", <files…>]
     pub index: usize,           // current choice
 }
 ```
 
 `App::open_settings()` builds the rows. The theme row's choices are
-`theme::BUILTINS` (`default`, `light`, `mono`, `firmitas`, in that
-order) followed by `theme::list_user_themes(&dir)`: file names in
+`theme::BUILTINS` (`default`, `light`, `mono`, `firmitas`, `tokyonight`,
+in that order) followed by `theme::list_user_themes(&dir)`: file names in
 `dir/themes/` that pass `config::valid_theme_name`, sorted, excluding
 names that collide with a builtin (the builtin wins, same as the
 loader). `index` is the position of `config.theme_name`; if it isn't in
@@ -179,9 +181,43 @@ The mapping mirrors `default`'s roles (h1 = the "magenta" accent
 because gold is the theme's headline color; quote = the theme's
 "yellow"; code = "cyan"). Tweak by overlay if a slot reads wrong.
 
-`Theme::named("firmitas")` returns it; `theme::BUILTINS` is the single
-list both `named` and the popup consult. README config table and Themes
-section list the fourth name.
+### `tokyonight` builtin
+
+`Theme::tokyonight()`, name `tokyonight`, truecolor. Source: the
+canonical Tokyo Night "night" palette (folke/tokyonight.nvim). Same
+role mapping as `firmitas` and `default`: blue headings, green code,
+yellow quotes, magenta for checkbox/html tags, cyan for bullets/attrs.
+
+| slot | style | palette role |
+|---|---|---|
+| text | fg `#c0caf5` | fg |
+| bold | fg `#c0caf5`, BOLD | fg |
+| italic | fg `#c0caf5`, ITALIC | fg |
+| mark | fg `#565f89` | comment |
+| done | fg `#565f89` | comment |
+| welcome | fg `#565f89` | comment |
+| heading1 | fg `#7aa2f7`, BOLD | blue |
+| heading2 | fg `#7aa2f7` | blue |
+| heading | fg `#bb9af7` | magenta |
+| code | fg `#9ece6a` | green |
+| quote | fg `#e0af68` | yellow |
+| link | fg `#7aa2f7`, UNDERLINED | blue |
+| bullet | fg `#7dcfff` | cyan |
+| checkbox | fg `#bb9af7` | magenta |
+| html_tag | fg `#bb9af7` | magenta |
+| html_attr | fg `#7dcfff` | cyan |
+| border_focused | fg `#7aa2f7` | blue |
+| popup_border | fg `#7aa2f7` | blue |
+| border_unfocused | fg `#3b4261` | fg_gutter |
+| status_bar | fg `#1a1b26` on `#7aa2f7` | bg on blue |
+| tree_open | fg `#1a1b26` on `#7aa2f7` | bg on blue |
+| selection | fg `#c0caf5` on `#33467c` | fg on bg_visual |
+| search_match | fg `#1a1b26` on `#e0af68` | bg on yellow |
+| prompt_cursor | REVERSED | — |
+
+`Theme::named("firmitas")` / `named("tokyonight")` return them;
+`theme::BUILTINS` is the single list both `named` and the popup consult.
+README config table and Themes section list all five names.
 
 ### Help and docs
 
@@ -217,7 +253,9 @@ section list the fourth name.
   test never sets `XDG_CONFIG_HOME`.
 - `theme::list_user_themes` on a temp dir: sorted, invalid names
   skipped, builtin collisions dropped, missing dir → empty.
-- `Theme::firmitas()` field table vs the spec (every slot).
+- `Theme::firmitas()` and `Theme::tokyonight()` field tables vs the
+  spec (every slot); `BUILTINS` names round-trip through `named` and
+  `valid_theme_name`.
 - App: `s` in tree opens `Prompt::Settings` with index on the current
   theme; `l` changes `app.theme` to `Theme::light()` when starting from
   default; `Esc` closes; `s` in the editor pane still types.
