@@ -33,6 +33,8 @@ pub enum Kind {
     Number,
     /// a `name!` macro invocation or a `#[attribute]`
     Macro,
+    /// a function name: after `fn`, or any plain identifier called with `(`
+    Function,
 }
 
 /// `[start, end)` in CHAR indices of the line.
@@ -513,6 +515,8 @@ fn rust_line(chars: &[char], state: &mut RustState, base: Kind) -> Vec<SpanTok> 
     let n = chars.len();
     let mut spans = Vec::new();
     let mut i = 0;
+    // the previous identifier on this line was the `fn` keyword
+    let mut after_fn = false;
     while i < n {
         if state.block_depth > 0 {
             let end = scan_block_comment(chars, i, &mut state.block_depth);
@@ -655,20 +659,42 @@ fn rust_line(chars: &[char], state: &mut RustState, base: Kind) -> Vec<SpanTok> 
             i = j;
             continue;
         }
-        // identifiers: keyword, macro!, Type / primitive, or plain
+        // identifiers: keyword, macro!, Type / primitive, function, or plain
         if is_ident_start(c) {
             let mut j = i + 1;
             while j < n && is_ident_char(chars[j]) {
                 j += 1;
             }
+            // raw identifier `r#type`: a plain name, whatever it says
+            let raw = j == i + 1
+                && c == 'r'
+                && chars.get(j) == Some(&'#')
+                && chars.get(j + 1).is_some_and(|&d| is_ident_start(d));
+            if raw {
+                j += 2;
+                while j < n && is_ident_char(chars[j]) {
+                    j += 1;
+                }
+            }
             let word: String = chars[i..j].iter().collect();
-            let kind = if chars.get(j) == Some(&'!') && chars.get(j + 1) != Some(&'=') {
+            let was_after_fn = after_fn;
+            after_fn = false;
+            let kind = if raw {
+                if chars.get(j) == Some(&'(') || was_after_fn {
+                    Kind::Function
+                } else {
+                    base
+                }
+            } else if chars.get(j) == Some(&'!') && chars.get(j + 1) != Some(&'=') {
                 j += 1;
                 Kind::Macro
             } else if RUST_KEYWORDS.contains(&word.as_str()) {
+                after_fn = word == "fn";
                 Kind::Keyword
             } else if RUST_PRIMITIVES.contains(&word.as_str()) || c.is_uppercase() {
                 Kind::TypeName
+            } else if was_after_fn || chars.get(j) == Some(&'(') {
+                Kind::Function
             } else {
                 base
             };

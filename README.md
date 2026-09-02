@@ -9,8 +9,8 @@ The editor styles markdown live as you type — headings by level,
 bold/italic, inline and fenced code, checkboxes (done items dimmed),
 blockquotes, links, YAML frontmatter — plus HTML tag/attribute/string
 coloring in `.html` files and for inline HTML in markdown, and Rust
-syntax (keywords, types, strings, comments, numbers, macros,
-attributes) in `.rs` files and inside ```rust fences. Every
+syntax (keywords, types, functions, strings, comments, numbers,
+macros, attributes) in `.rs` files and inside ```rust fences. Every
 character stays visible; syntax marks are dimmed, never hidden, so the
 layout never shifts under your cursor. Tabs display as 4 spaces, not
 tab-stops.
@@ -73,7 +73,7 @@ mrkdup [directory]   # defaults to the current directory
 
 ### Tabs
 
-Every file you open gets a tab in the bar across the top of the editor pane: `name ×`, with a `*` after the name while the buffer has unsaved changes. The active tab is highlighted (theme keys `tab_active` / `tab_inactive`). When there are more tabs than fit, the bar scrolls so the active one stays visible. Idle autosave and reload-on-external-change run for every tab, not just the one on screen; switching away from a tab saves it; quitting saves them all (a disk conflict in any tab stops the quit with the usual warning, and Ctrl+Q again discards). Renaming or moving a file in the tree follows it into its tab; deleting one closes its tab.
+Every file you open gets a tab in the bar across the top of the editor pane: `name ×`, with a `*` after the name while the buffer has unsaved changes. The active tab is highlighted (theme keys `tab_active` / `tab_inactive`). Names longer than 20 cells are cut with `…`. When there are more tabs than fit, the bar scrolls so the active one stays visible, with `‹` / `›` at the edges for the tabs hidden that way. Idle autosave and reload-on-external-change run for every tab, not just the one on screen; switching away from a tab saves it; quitting saves them all (a disk conflict in any tab stops the quit with the usual warning, and Ctrl+Q again discards). Renaming or moving a file in the tree follows it into its tab; deleting one closes its tab.
 
 ### Mouse
 
@@ -82,9 +82,9 @@ mrkdup takes over the mouse, so a click and a drag act on the pane they land in 
 | Where | Action |
 |---|---|
 | editor | click lands the cursor (and focuses the editor); drag selects; the selection is confined to the editor pane — drag over the tree or past the top/bottom edge and it keeps extending (scrolling a row at a time) |
-| editor | releasing a drag copies the selection to the system clipboard through OSC 52 (iTerm2, kitty, WezTerm, Ghostty, Alacritty, foot, tmux with `set-clipboard on`; Terminal.app ignores it) |
-| editor | wheel moves the cursor three lines |
-| tab bar | click a name to switch to that tab; click its × to close it (same as Ctrl+W) |
+| editor | releasing a drag copies the selection to the system clipboard: through OSC 52 (iTerm2, kitty, WezTerm, Ghostty, Alacritty, foot, tmux with `set-clipboard on`) and, when one is installed, a local command — `pbcopy` on macOS (so Terminal.app works too), `wl-copy` under Wayland, `xclip` or `xsel` under X11 |
+| editor | wheel scrolls the view three rows without moving the cursor; the next key or click brings the view back to the cursor |
+| tab bar | click a name to switch to that tab; click its × to close it (same as Ctrl+W); when tabs are hidden off either edge, `‹` / `›` appear there and step one tab |
 | tree | click selects the row and opens it (a folder toggles), like Enter; wheel moves the selection three rows |
 
 Hold Shift while dragging to get the terminal's own selection back (Option in some macOS terminals).
@@ -183,7 +183,8 @@ and syntax slot mrkdup paints:
 `checkbox`, `done`, `quote`, `link`, `bullet`, `html_tag`,
 `html_attr`, `search_match`, and for Rust code: `keyword`,
 `type_name` (also lifetimes), `string` (also char literals),
-`comment`, `number`, `macro` (`name!` calls and `#[attributes]`).
+`comment`, `number`, `macro` (`name!` calls and `#[attributes]`),
+`function` (after `fn`, or any plain name called with `(`).
 
 `name` is not settable from a theme file — it's how the theme is
 addressed, not part of it.

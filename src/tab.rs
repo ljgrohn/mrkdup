@@ -9,11 +9,15 @@ use std::time::Instant;
 use unicode_width::UnicodeWidthStr;
 
 use crate::editor::Editor;
+use crate::wrap;
 
 pub struct Tab {
     pub editor: Editor,
     /// vertical scroll of the editor renderer, in visual rows
     pub scroll: usize,
+    /// `false` after a wheel scroll: the view stays where it was put,
+    /// even with the cursor off screen, until the next key or click
+    pub follow_cursor: bool,
     pub last_edit: Option<Instant>,
     /// after a disk-conflict warning, the next Ctrl+S overwrites
     pub force_next_save: bool,
@@ -27,6 +31,7 @@ impl Tab {
         Tab {
             editor,
             scroll: 0,
+            follow_cursor: true,
             last_edit: None,
             force_next_save: false,
             search_highlight: None,
@@ -71,9 +76,23 @@ pub fn after_close(active: usize, closed: usize, len: usize) -> usize {
     next.min(len - 1)
 }
 
+/// What a painted piece of the tab bar is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Part {
+    /// the tab's name; a click switches to it
+    Title,
+    /// the `×`; a click closes it
+    Close,
+    /// the `‹` at the left edge when tabs are hidden that way; a click
+    /// goes one tab left
+    Prev,
+    /// the `›` at the right edge; a click goes one tab right
+    Next,
+}
+
 /// One painted piece of the tab bar: the cells `[x0, x1)` (relative to
-/// the bar's left edge) showing `text`, belonging to tab `index`. A
-/// `close` piece is the `×` that closes the tab.
+/// the bar's left edge) showing `text`, belonging to tab `index` (for
+/// `Prev`/`Next`, the tab a click would go to).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Segment {
     pub x0: u16,
@@ -81,7 +100,7 @@ pub struct Segment {
     pub text: String,
     pub index: usize,
     pub active: bool,
-    pub close: bool,
+    pub part: Part,
 }
 
 impl Segment {
@@ -92,64 +111,91 @@ impl Segment {
 
 /// The close glyph and its trailing space, as painted.
 const CLOSE: &str = "× ";
+/// Longer names are cut with `…` so one tab can't hog the bar.
+pub const MAX_TITLE: usize = 20;
 
-/// Lay `titles` out left to right in `width` cells as ` title × ` runs,
+/// Lay `titles` out left to right in `width` cells as ` title × ` runs.
+/// When they don't all fit, one cell at each edge shows `‹` / `›` for
+/// the tabs hidden that way (blank when nothing is), and the run is
 /// scrolled so the active tab is fully visible (tabs before it drop off
 /// the left first); the last tab that doesn't fit is cut at the edge.
 pub fn layout_bar(titles: &[String], active: usize, width: u16) -> Vec<Segment> {
+    let n = titles.len();
     let width = width as usize;
-    let tab_w = |t: &String| t.width() + 2 + CLOSE.width();
+    let mut out = Vec::new();
+    if n == 0 || width == 0 {
+        return out;
+    }
+    let labels: Vec<String> = titles
+        .iter()
+        .map(|t| format!(" {} ", wrap::ellipsize(t, MAX_TITLE)))
+        .collect();
+    let tab_w = |i: usize| labels[i].width() + CLOSE.width();
+    let total: usize = (0..n).map(tab_w).sum();
+    let overflow = total > width;
+    let edges = if overflow && width >= 3 { 1 } else { 0 };
+    let avail = width - 2 * edges;
     let mut start = 0;
-    while start < active && titles[start..=active].iter().map(tab_w).sum::<usize>() > width {
+    while start < active && (start..=active).map(tab_w).sum::<usize>() > avail {
         start += 1;
     }
-    let mut out = Vec::new();
-    let mut x = 0usize;
-    for (i, title) in titles.iter().enumerate().skip(start) {
-        if x >= width {
+    let mut x = edges;
+    if edges == 1 {
+        out.push(Segment {
+            x0: 0,
+            x1: 1,
+            text: if start > 0 { "‹" } else { " " }.into(),
+            index: active.saturating_sub(1),
+            active: false,
+            part: Part::Prev,
+        });
+    }
+    let end_x = x + avail;
+    let mut last_shown_fully = None;
+    for (i, label) in labels.iter().enumerate().skip(start) {
+        if x >= end_x {
             break;
         }
-        let label = format!(" {title} ");
-        let label = clip(&label, width - x);
-        let lw = label.width();
+        let text = wrap::clip(label, end_x - x);
+        let w = text.width();
         out.push(Segment {
             x0: x as u16,
-            x1: (x + lw) as u16,
-            text: label,
+            x1: (x + w) as u16,
+            text,
             index: i,
             active: i == active,
-            close: false,
+            part: Part::Title,
         });
-        x += lw;
-        if x >= width {
+        x += w;
+        if x >= end_x {
             break;
         }
-        let glyph = clip(CLOSE, width - x);
-        let gw = glyph.width();
+        let glyph = wrap::clip(CLOSE, end_x - x);
+        let w = glyph.width();
+        let whole = glyph == CLOSE;
         out.push(Segment {
             x0: x as u16,
-            x1: (x + gw) as u16,
+            x1: (x + w) as u16,
             text: glyph,
             index: i,
             active: i == active,
-            close: true,
+            part: Part::Close,
         });
-        x += gw;
-    }
-    out
-}
-
-/// The longest prefix of `s` at most `cells` wide.
-fn clip(s: &str, cells: usize) -> String {
-    let mut out = String::new();
-    let mut w = 0;
-    for ch in s.chars() {
-        let cw = crate::wrap::ch_width(ch);
-        if w + cw > cells {
-            break;
+        x += w;
+        if whole {
+            last_shown_fully = Some(i);
         }
-        w += cw;
-        out.push(ch);
+    }
+    if edges == 1 {
+        let more_right = last_shown_fully.is_none_or(|i| i + 1 < n);
+        out.push(Segment {
+            x0: end_x as u16,
+            x1: (end_x + 1) as u16,
+            text: if more_right { "›" } else { " " }.into(),
+            index: (active + 1).min(n - 1),
+            active: false,
+            part: Part::Next,
+        });
     }
     out
 }

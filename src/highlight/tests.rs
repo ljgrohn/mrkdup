@@ -251,7 +251,7 @@ fn rust_keywords_types_and_macros() {
     let p = pieces(line, &s[0]);
     assert!(p.contains(&(Kind::Keyword, "pub".into())));
     assert!(p.contains(&(Kind::Keyword, "fn".into())));
-    assert_eq!(kind_of(line, &s[0], "main"), Kind::Text);
+    assert_eq!(kind_of(line, &s[0], "main"), Kind::Function);
     assert!(p.contains(&(Kind::TypeName, "Option".into())));
     assert!(p.contains(&(Kind::TypeName, "u8".into())));
     assert!(p.contains(&(Kind::Macro, "println!".into())));
@@ -392,4 +392,21 @@ fn rust_every_line_is_fully_covered() {
         assert_covers(spans, line.chars().count());
     }
     assert_eq!(kinds(&s[2]), vec![Kind::Comment]);
+}
+
+#[test]
+fn rust_function_names_and_raw_identifiers() {
+    let line = "fn r#type(x: u8) -> u8 { helper(x) + count + r#match }";
+    let s = rs(&[line]);
+    assert_eq!(kind_of(line, &s[0], "r#type"), Kind::Function); // after fn
+    assert_eq!(kind_of(line, &s[0], "helper"), Kind::Function); // called
+    assert_eq!(kind_of(line, &s[0], "count"), Kind::Text);
+    assert_eq!(kind_of(line, &s[0], "r#match"), Kind::Text); // not a keyword
+    assert_eq!(kind_of(line, &s[0], "x:"), Kind::Text);
+    // keywords and types before `(` keep their own kinds
+    let line = "if Some(v) = f() { while (x) {} }";
+    let s = rs(&[line]);
+    assert_eq!(kind_of(line, &s[0], "Some"), Kind::TypeName);
+    assert_eq!(kind_of(line, &s[0], "while"), Kind::Keyword);
+    assert_eq!(kind_of(line, &s[0], "f()"), Kind::Function);
 }

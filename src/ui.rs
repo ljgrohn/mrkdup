@@ -218,12 +218,17 @@ fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
             .map(|r| r.name.chars().count())
             .max()
             .unwrap_or(0);
+        // sized by the widest choice of any row, so cycling never
+        // resizes the popup; capped to the pane, with values cut to fit
         let value_w = rows
             .iter()
-            .map(|r| r.value().chars().count())
+            .flat_map(|r| r.choices.iter())
+            .map(|c| c.chars().count())
             .max()
             .unwrap_or(0);
-        let width = ((name_w + value_w + 12) as u16).max(40);
+        let width = ((name_w + value_w + 12) as u16)
+            .max(40)
+            .min(area.width.saturating_sub(4).max(20));
         let height = (rows.len() as u16 + 2).min(area.height);
         let popup = centered_rect(width, height, area);
         f.render_widget(Clear, popup);
@@ -234,7 +239,9 @@ fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, r)| {
-                let value = format!("‹ {} ›", r.value());
+                // " name" + gap(>=1) + "‹ value ›" + " " = name + value + 7
+                let room = (inner.width as usize).saturating_sub(r.name.chars().count() + 7);
+                let value = format!("‹ {} ›", crate::wrap::ellipsize(r.value(), room));
                 let gap = (inner.width as usize)
                     .saturating_sub(r.name.chars().count() + value.chars().count() + 2)
                     .max(1);
@@ -378,6 +385,7 @@ fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
         search: tab.search_highlight.as_deref(),
         file_kind,
         scroll: &mut tab.scroll,
+        follow_cursor: tab.follow_cursor,
         cache,
         theme,
     };

@@ -137,6 +137,36 @@ pub fn hit_test(rows: &[VisualRow], lines: &[String], vrow: usize, x: usize) -> 
     (row.line, col)
 }
 
+/// The longest prefix of `s` at most `cells` wide.
+pub fn clip(s: &str, cells: usize) -> String {
+    let mut out = String::new();
+    let mut w = 0;
+    for ch in s.chars() {
+        let cw = ch_width(ch);
+        if w + cw > cells {
+            break;
+        }
+        w += cw;
+        out.push(ch);
+    }
+    out
+}
+
+/// `s` if it fits in `cells`, else its prefix plus `…` to fit. A budget
+/// of 0 yields the empty string, 1 yields `…` alone.
+pub fn ellipsize(s: &str, cells: usize) -> String {
+    let width: usize = s.chars().map(ch_width).sum();
+    if width <= cells {
+        return s.to_string();
+    }
+    if cells == 0 {
+        return String::new();
+    }
+    let mut out = clip(s, cells - 1);
+    out.push('…');
+    out
+}
+
 /// Adjust vertical scroll (in visual rows) so `cursor_row` is visible.
 pub fn scroll_top(current_top: usize, cursor_row: usize, height: usize) -> usize {
     let height = height.max(1);

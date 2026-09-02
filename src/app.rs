@@ -8,7 +8,7 @@ use ratatui_textarea::{CursorMove, Input};
 
 use crate::config::Config;
 use crate::editor::{Editor, SaveOutcome};
-use crate::tab::{self, Segment, Tab};
+use crate::tab::{self, Part, Segment, Tab};
 use crate::theme::Theme;
 use crate::tree::Tree;
 
@@ -122,21 +122,26 @@ impl App {
     #[cfg(test)]
     pub fn new(root: PathBuf, config: Config) -> io::Result<App> {
         let theme = Theme::named(&config.theme_name);
-        let mut app = App::new_with_theme(root, config, theme)?;
-        app.config_dir = None; // tests must never write the user's real config
-        Ok(app)
+        // no config dir: tests must never write the user's real config
+        App::new_with_theme(root, config, theme, None)
     }
 
     /// Same as `new`, but with an already-resolved `Theme` (e.g. one
     /// loaded from disk via `theme::load`, overlay files and all)
-    /// instead of looking one up by `config.theme_name` again.
-    pub fn new_with_theme(root: PathBuf, config: Config, theme: Theme) -> io::Result<App> {
+    /// instead of looking one up by `config.theme_name` again, and the
+    /// config directory the settings popup may write to.
+    pub fn new_with_theme(
+        root: PathBuf,
+        config: Config,
+        theme: Theme,
+        config_dir: Option<PathBuf>,
+    ) -> io::Result<App> {
         Ok(App {
             tree: Tree::new(root)?,
             tabs: Vec::new(),
             active: 0,
             theme,
-            config_dir: crate::config::config_dir(),
+            config_dir,
             config,
             focus: Focus::Tree,
             tree_visible: true,
@@ -291,20 +296,20 @@ impl App {
                 {
                     let rel = x - bar.x;
                     if let Some(seg) = segs.iter().find(|s| s.hit(rel)) {
-                        let (i, close) = (seg.index, seg.close);
-                        if close {
-                            self.close_tab(i);
-                        } else {
-                            self.activate_tab(i);
+                        let (i, part) = (seg.index, seg.part);
+                        match part {
+                            Part::Close => self.close_tab(i),
+                            Part::Title | Part::Prev | Part::Next => self.activate_tab(i),
                         }
                     }
                 } else if let Some(area) = self.editor_area.filter(|a| contains(*a, x, y)) {
                     self.focus = Focus::Editor;
                     let (row, col) = self.editor_hit(area, x, y);
-                    let ed = self.ed();
-                    ed.cancel_selection();
-                    ed.set_cursor(row, col);
-                    ed.start_selection();
+                    let tab = &mut self.tabs[self.active];
+                    tab.follow_cursor = true;
+                    tab.editor.cancel_selection();
+                    tab.editor.set_cursor(row, col);
+                    tab.editor.start_selection();
                     self.dragging = true;
                 } else if let Some(area) = self.tree_area.filter(|a| contains(*a, x, y)) {
                     self.focus = Focus::Tree;
@@ -317,7 +322,9 @@ impl App {
             MouseEventKind::Drag(MouseButton::Left) if self.dragging => {
                 if let Some(area) = self.editor_area {
                     let (row, col) = self.editor_hit(area, x, y);
-                    self.ed().set_cursor(row, col);
+                    let tab = &mut self.tabs[self.active];
+                    tab.follow_cursor = true;
+                    tab.editor.set_cursor(row, col);
                 }
             }
             MouseEventKind::Up(MouseButton::Left) if self.dragging => {
@@ -334,14 +341,16 @@ impl App {
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 let up = matches!(m.kind, MouseEventKind::ScrollUp);
                 if self.editor_area.is_some_and(|a| contains(a, x, y)) {
-                    // plain cursor motion, like the arrow keys (which also
-                    // drop any selection)
-                    let ed = self.ed();
-                    ed.cancel_selection();
-                    let mv = if up { CursorMove::Up } else { CursorMove::Down };
-                    for _ in 0..3 {
-                        ed.move_cursor(mv);
-                    }
+                    // scroll the view, not the cursor; the renderer clamps
+                    // to the last row and stops following the cursor
+                    // until the next key or click
+                    let tab = &mut self.tabs[self.active];
+                    tab.scroll = if up {
+                        tab.scroll.saturating_sub(3)
+                    } else {
+                        tab.scroll + 3
+                    };
+                    tab.follow_cursor = false;
                 } else if self.tree_area.is_some_and(|a| contains(a, x, y)) {
                     for _ in 0..3 {
                         if up {
@@ -728,6 +737,8 @@ impl App {
             }
             return;
         }
+        // any key brings the view back to the cursor after a wheel scroll
+        self.tabs[self.active].follow_cursor = true;
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match (ctrl, key.code) {
             // Shift+Tab arrives as BackTab; treat it like Esc
@@ -1069,6 +1080,7 @@ impl App {
             return;
         }
         let tab = &mut self.tabs[self.active];
+        tab.follow_cursor = true;
         // the renderer highlights every (case-insensitive) match of this
         tab.search_highlight = Some(query.to_string());
         let (crow, ccol) = tab.editor.cursor();

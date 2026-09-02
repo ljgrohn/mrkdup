@@ -35,7 +35,7 @@ fn main() -> io::Result<()> {
     let (config, mut warnings) = config::load();
     let (theme, theme_warnings) = theme::load(&config.theme_name);
     warnings.extend(theme_warnings);
-    let mut app = app::App::new_with_theme(root, config, theme)?;
+    let mut app = app::App::new_with_theme(root, config, theme, config::config_dir())?;
     if !warnings.is_empty() {
         app.status = Some(format!(
             "config/theme: {} warning(s) — {}",

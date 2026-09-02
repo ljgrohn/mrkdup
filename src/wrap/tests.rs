@@ -210,3 +210,15 @@ fn hit_test_on_empty_document_is_origin() {
     assert_eq!(hit_test(&rows, &ls, 3, 3), (0, 0));
     assert_eq!(hit_test(&[], &ls, 0, 0), (0, 0));
 }
+
+#[test]
+fn clip_and_ellipsize_respect_cell_widths() {
+    assert_eq!(clip("hello", 3), "hel");
+    assert_eq!(clip("日本x", 3), "日");
+    assert_eq!(ellipsize("hello", 10), "hello");
+    assert_eq!(ellipsize("hello", 5), "hello");
+    assert_eq!(ellipsize("hello world", 5), "hell…");
+    assert_eq!(ellipsize("日本語です", 4), "日…");
+    assert_eq!(ellipsize("abc", 1), "…");
+    assert_eq!(ellipsize("abc", 0), "");
+}

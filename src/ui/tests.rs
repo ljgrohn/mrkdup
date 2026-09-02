@@ -389,3 +389,44 @@ fn tab_bar_shows_every_open_file_and_highlights_the_active_one() {
     let text = format!("{:?}", buf);
     assert!(text.contains("two"));
 }
+
+#[test]
+fn settings_popup_is_sized_by_the_widest_choice_and_capped_to_the_pane() {
+    let root = std::env::temp_dir().join("mrkdup-ui-settings-width");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let mut app = App::new(root, Config::default()).unwrap();
+    // a very long theme name among the choices
+    let long = "a-theme-name-that-goes-on-and-on-and-on-and-on-and-on";
+    app.prompt = Prompt::Settings {
+        rows: vec![crate::app::SettingRow {
+            name: "theme",
+            choices: vec!["default".into(), long.into()],
+            index: 1,
+        }],
+        selected: 0,
+    };
+    let backend = TestBackend::new(50, 10);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buf = terminal.backend().buffer();
+    let rows: Vec<String> = (0..10)
+        .map(|y| {
+            (0..50)
+                .map(|x| buf.cell((x, y)).unwrap().symbol().to_string())
+                .collect()
+        })
+        .collect();
+    let row = rows.iter().find(|r| r.contains("theme")).unwrap();
+    // cut with an ellipsis, closing › still inside the popup border
+    assert!(row.contains('…'), "{row:?}");
+    assert!(row.contains("›"), "{row:?}");
+    let popup_line = rows.iter().find(|r| r.contains("Settings")).unwrap();
+    let chars: Vec<char> = popup_line.chars().collect();
+    let left = chars.iter().position(|&c| c == '┌' || c == '╭').unwrap();
+    let right = chars.iter().rposition(|&c| c == '┐' || c == '╮').unwrap();
+    let popup_w = right - left + 1;
+    // capped: the padded pane is 48 wide, so at most 44; and never
+    // narrower than the 40 minimum
+    assert!((40..=44).contains(&popup_w), "{popup_line:?}");
+}

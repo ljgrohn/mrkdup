@@ -365,3 +365,40 @@ fn settings_popup_second_row_and_value_align_to_border() {
         "second row missing its default value: {side_padding_row}"
     );
 }
+
+#[test]
+fn wheel_scroll_holds_the_view_until_a_key_brings_the_cursor_back() {
+    let root = std::env::temp_dir().join("mrkdup-render-wheel");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let body: String = (1..=60).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(root.join("a.md"), body).unwrap();
+    let mut app = App::new(root, Config::default()).unwrap();
+    app.handle_key(key(KeyCode::Enter));
+    let backend = TestBackend::new(80, 15);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    // scroll the view well past the cursor on line 1
+    let area = app.editor_area.unwrap();
+    for _ in 0..10 {
+        app.handle_mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::ScrollDown,
+            column: area.x + 1,
+            row: area.y + 1,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+    terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    let text = format!("{:?}", terminal.backend().buffer());
+    assert!(!text.contains("line 1 "), "view should have left line 1");
+    assert!(text.contains("line 31"), "{text}");
+    assert_eq!(app.editor().cursor(), (0, 0));
+    assert_eq!(app.tab().unwrap().scroll, 30);
+    // a key press (one that keeps the cursor on line 1): the view
+    // snaps back to the cursor
+    app.handle_key(key(KeyCode::Right));
+    terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    let text = format!("{:?}", terminal.backend().buffer());
+    assert!(text.contains("line 1 "));
+    assert_eq!(app.tab().unwrap().scroll, 0);
+}

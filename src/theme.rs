@@ -52,6 +52,7 @@ pub struct Theme {
     pub comment: Style,
     pub number: Style,
     pub macro_call: Style, // `name!` and `#[attributes]`
+    pub function: Style,
 }
 
 /// The shipped palettes, in the order the settings popup lists them.
@@ -107,6 +108,7 @@ impl Default for Theme {
             comment: Style::default().add_modifier(Modifier::DIM),
             number: Style::default().fg(Color::Cyan),
             macro_call: Style::default().fg(Color::Blue),
+            function: Style::default().fg(Color::Blue),
         }
     }
 }
@@ -153,6 +155,7 @@ impl Theme {
             comment: Style::default().add_modifier(Modifier::DIM),
             number: Style::default().fg(Color::Red),
             macro_call: Style::default().fg(Color::Blue),
+            function: Style::default().fg(Color::Blue),
         }
     }
 
@@ -196,6 +199,7 @@ impl Theme {
             comment: dim,
             number: Style::default(),
             macro_call: Style::default(),
+            function: Style::default(),
         }
     }
 
@@ -250,6 +254,7 @@ impl Theme {
             comment: Style::default().fg(muted),
             number: Style::default().fg(gilded),
             macro_call: Style::default().fg(bronze),
+            function: Style::default().fg(marble),
         }
     }
 
@@ -301,6 +306,7 @@ impl Theme {
             comment: Style::default().fg(comment),
             number: Style::default().fg(orange),
             macro_call: Style::default().fg(blue),
+            function: Style::default().fg(blue),
         }
     }
 
@@ -340,6 +346,7 @@ impl Theme {
             Kind::Comment => self.comment,
             Kind::Number => self.number,
             Kind::Macro => self.macro_call,
+            Kind::Function => self.function,
         }
     }
 }
@@ -551,6 +558,7 @@ pub fn parse_overlay(text: &str, theme: &mut Theme) -> Vec<String> {
             "comment" => &mut theme.comment,
             "number" => &mut theme.number,
             "macro" => &mut theme.macro_call,
+            "function" => &mut theme.function,
             _ => {
                 warnings.push(format!("line {n}: unknown option: {key}"));
                 continue;

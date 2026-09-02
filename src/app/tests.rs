@@ -1284,7 +1284,7 @@ fn click_on_empty_tree_space_only_focuses_the_tree() {
 }
 
 #[test]
-fn wheel_moves_the_editor_cursor_three_lines() {
+fn wheel_scrolls_the_view_three_rows_and_leaves_the_cursor() {
     let root = fixture("wheel");
     let body: String = (1..=30).map(|i| format!("line {i}\n")).collect();
     fs::write(root.join("a.md"), body).unwrap();
@@ -1293,13 +1293,41 @@ fn wheel_moves_the_editor_cursor_three_lines() {
     app.tree_area = Some(Rect::new(1, 1, 28, 8));
     app.editor_area = Some(Rect::new(32, 1, 40, 8));
     app.handle_mouse(mouse(MouseEventKind::ScrollDown, 40, 3));
-    assert_eq!(app.editor().cursor(), (3, 0));
-    app.handle_mouse(mouse(MouseEventKind::ScrollUp, 40, 3));
+    app.handle_mouse(mouse(MouseEventKind::ScrollDown, 40, 3));
     assert_eq!(app.editor().cursor(), (0, 0));
+    assert_eq!(app.tab().unwrap().scroll, 6);
+    assert!(!app.tab().unwrap().follow_cursor);
+    app.handle_mouse(mouse(MouseEventKind::ScrollUp, 40, 3));
+    assert_eq!(app.tab().unwrap().scroll, 3);
+    // a key brings the view back to the cursor
+    app.handle_key(key(KeyCode::Right));
+    assert!(app.tab().unwrap().follow_cursor);
     // over the tree the wheel moves the tree selection instead
     app.handle_mouse(mouse(MouseEventKind::ScrollDown, 5, 3));
     assert_eq!(app.tree.selected(), 1); // clamped: only two rows
-    assert_eq!(app.editor().cursor(), (0, 0));
+    assert_eq!(app.tab().unwrap().scroll, 3);
+}
+
+#[test]
+fn clicking_the_bar_edge_markers_steps_one_tab() {
+    let mut app = two_tabs("tabs-edges");
+    fs::write(app.tree.root().join("c.md"), "sea\n").unwrap();
+    app.handle_key(key(KeyCode::Esc));
+    app.handle_key(key(KeyCode::Char('u')));
+    app.handle_key(key(KeyCode::Char('G')));
+    app.handle_key(key(KeyCode::Enter)); // a, b, c open; c active
+    assert_eq!(app.active, 2);
+    // a bar too narrow for all three: "‹ b.md ×  c.md ×  "
+    let segs = crate::tab::layout_bar(&app.tab_titles(), app.active, 18);
+    app.tab_bar = Some((Rect::new(31, 1, 18, 1), segs));
+    app.handle_mouse(down(31, 1)); // ‹
+    app.handle_mouse(up(31, 1));
+    assert_eq!(app.active, 1);
+    let segs = crate::tab::layout_bar(&app.tab_titles(), app.active, 18);
+    app.tab_bar = Some((Rect::new(31, 1, 18, 1), segs));
+    app.handle_mouse(down(31 + 17, 1)); // ›
+    app.handle_mouse(up(31 + 17, 1));
+    assert_eq!(app.active, 2);
 }
 
 #[test]

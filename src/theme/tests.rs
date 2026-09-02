@@ -36,6 +36,7 @@ fn legacy_style(kind: Kind) -> Style {
         Kind::Comment => Style::default().add_modifier(Modifier::DIM),
         Kind::Number => Style::default().fg(Color::Cyan),
         Kind::Macro => Style::default().fg(Color::Blue),
+        Kind::Function => Style::default().fg(Color::Blue),
     }
 }
 
@@ -69,6 +70,7 @@ const ALL_KINDS: &[Kind] = &[
     Kind::Comment,
     Kind::Number,
     Kind::Macro,
+    Kind::Function,
 ];
 
 #[test]
@@ -154,6 +156,7 @@ fn mono_theme_has_no_color_anywhere() {
         theme.comment,
         theme.number,
         theme.macro_call,
+        theme.function,
     ];
     for style in styles {
         assert_eq!(

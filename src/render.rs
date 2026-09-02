@@ -24,6 +24,10 @@ pub struct EditorView<'a> {
     pub search: Option<&'a str>,
     pub file_kind: highlight::FileKind,
     pub scroll: &'a mut usize,
+    /// Keep the cursor row on screen (the normal case). `false` after a
+    /// wheel scroll: the view is wherever it was put, and the cursor is
+    /// drawn only if it happens to be visible.
+    pub follow_cursor: bool,
     /// Wrap + highlight cache, owned by `Editor`. Recomputed here only
     /// when it's stale, the width changed, or the file kind changed.
     pub cache: &'a mut LayoutCache,
@@ -43,12 +47,16 @@ pub fn render_editor(f: &mut Frame, view: EditorView, inner: Rect, focused: bool
         search,
         file_kind,
         scroll,
+        follow_cursor,
         cache,
         theme,
     } = view;
     let (rows, spans) = cache.ensure(lines, width, file_kind);
     let (cvrow, cx) = wrap::cursor_position(rows, lines, cursor);
-    *scroll = wrap::scroll_top((*scroll).min(rows.len().saturating_sub(1)), cvrow, height);
+    *scroll = (*scroll).min(rows.len().saturating_sub(1));
+    if follow_cursor {
+        *scroll = wrap::scroll_top(*scroll, cvrow, height);
+    }
 
     let search: Option<(String, usize)> = search
         .filter(|q| !q.is_empty())
@@ -117,7 +125,7 @@ pub fn render_editor(f: &mut Frame, view: EditorView, inner: Rect, focused: bool
         .collect();
 
     f.render_widget(Paragraph::new(out), inner);
-    if focused {
+    if focused && cvrow >= *scroll && cvrow < *scroll + height {
         let x = inner.x + cx.min(width.saturating_sub(1)) as u16;
         let y = inner.y + (cvrow - *scroll) as u16;
         f.set_cursor_position((x, y));
