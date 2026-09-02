@@ -450,3 +450,138 @@ fn load_from_missing_named_file_warns_once_and_falls_back_to_default() {
     };
     assert_eq!(theme, expected);
 }
+
+fn hex(h: u32) -> Color {
+    Color::Rgb((h >> 16) as u8, ((h >> 8) & 0xff) as u8, (h & 0xff) as u8)
+}
+fn fg(h: u32) -> Style {
+    Style::default().fg(hex(h))
+}
+fn fg_mod(h: u32, m: Modifier) -> Style {
+    Style::default().fg(hex(h)).add_modifier(m)
+}
+fn fg_bg(f: u32, b: u32) -> Style {
+    Style::default().fg(hex(f)).bg(hex(b))
+}
+
+#[test]
+fn firmitas_matches_the_spec_table() {
+    let t = Theme::firmitas();
+    assert_eq!(t.name, "firmitas");
+    let expected = [
+        ("text", t.text, fg(0xafaaa2)),
+        ("bold", t.bold, fg_mod(0xd1ccc4, Modifier::BOLD)),
+        ("italic", t.italic, fg_mod(0xd1ccc4, Modifier::ITALIC)),
+        ("mark", t.mark, fg(0x6f6b63)),
+        ("done", t.done, fg(0x6f6b63)),
+        ("welcome", t.welcome, fg(0x6f6b63)),
+        ("heading1", t.heading1, fg_mod(0xe3bf79, Modifier::BOLD)),
+        ("heading2", t.heading2, fg(0xcea462)),
+        ("heading", t.heading, fg(0xd4bda2)),
+        ("code", t.code, fg(0xb49d80)),
+        ("quote", t.quote, fg(0xad936d)),
+        ("link", t.link, fg_mod(0xd4bda2, Modifier::UNDERLINED)),
+        ("bullet", t.bullet, fg(0xcea462)),
+        ("checkbox", t.checkbox, fg(0xe3bf79)),
+        ("html_tag", t.html_tag, fg(0xe3bf79)),
+        ("html_attr", t.html_attr, fg(0xb49d80)),
+        ("border_focused", t.border_focused, fg(0xd4bda2)),
+        ("popup_border", t.popup_border, fg(0xd4bda2)),
+        ("border_unfocused", t.border_unfocused, fg(0x514d46)),
+        ("status_bar", t.status_bar, fg_bg(0x0c1928, 0xd4bda2)),
+        ("tree_open", t.tree_open, fg_bg(0x0c1928, 0xd4bda2)),
+        ("selection", t.selection, fg_bg(0xfeeecd, 0x514d46)),
+        ("search_match", t.search_match, fg_bg(0x0c1928, 0xe3bf79)),
+        (
+            "prompt_cursor",
+            t.prompt_cursor,
+            Style::default().add_modifier(Modifier::REVERSED),
+        ),
+    ];
+    for (slot, got, want) in expected {
+        assert_eq!(got, want, "firmitas slot {slot}");
+    }
+}
+
+#[test]
+fn tokyonight_matches_the_spec_table() {
+    let t = Theme::tokyonight();
+    assert_eq!(t.name, "tokyonight");
+    let expected = [
+        ("text", t.text, fg(0xc0caf5)),
+        ("bold", t.bold, fg_mod(0xc0caf5, Modifier::BOLD)),
+        ("italic", t.italic, fg_mod(0xc0caf5, Modifier::ITALIC)),
+        ("mark", t.mark, fg(0x565f89)),
+        ("done", t.done, fg(0x565f89)),
+        ("welcome", t.welcome, fg(0x565f89)),
+        ("heading1", t.heading1, fg_mod(0x7aa2f7, Modifier::BOLD)),
+        ("heading2", t.heading2, fg(0x7aa2f7)),
+        ("heading", t.heading, fg(0xbb9af7)),
+        ("code", t.code, fg(0x9ece6a)),
+        ("quote", t.quote, fg(0xe0af68)),
+        ("link", t.link, fg_mod(0x7aa2f7, Modifier::UNDERLINED)),
+        ("bullet", t.bullet, fg(0x7dcfff)),
+        ("checkbox", t.checkbox, fg(0xbb9af7)),
+        ("html_tag", t.html_tag, fg(0xbb9af7)),
+        ("html_attr", t.html_attr, fg(0x7dcfff)),
+        ("border_focused", t.border_focused, fg(0x7aa2f7)),
+        ("popup_border", t.popup_border, fg(0x7aa2f7)),
+        ("border_unfocused", t.border_unfocused, fg(0x3b4261)),
+        ("status_bar", t.status_bar, fg_bg(0x1a1b26, 0x7aa2f7)),
+        ("tree_open", t.tree_open, fg_bg(0x1a1b26, 0x7aa2f7)),
+        ("selection", t.selection, fg_bg(0xc0caf5, 0x33467c)),
+        ("search_match", t.search_match, fg_bg(0x1a1b26, 0xe0af68)),
+        (
+            "prompt_cursor",
+            t.prompt_cursor,
+            Style::default().add_modifier(Modifier::REVERSED),
+        ),
+    ];
+    for (slot, got, want) in expected {
+        assert_eq!(got, want, "tokyonight slot {slot}");
+    }
+}
+
+#[test]
+fn builtins_round_trip_through_named_and_are_valid_names() {
+    assert_eq!(
+        BUILTINS,
+        &["default", "light", "mono", "firmitas", "tokyonight"]
+    );
+    for name in BUILTINS {
+        assert_eq!(Theme::named(name).name, *name, "named({name})");
+        assert!(
+            crate::config::valid_theme_name(name),
+            "{name} must be a valid theme name"
+        );
+    }
+    assert_eq!(Theme::named("nope").name, "default");
+}
+
+fn list_fixture(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("mrkdup-theme-list-{tag}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("themes").join("subdir")).unwrap();
+    std::fs::write(dir.join("themes/forest"), "heading1 = green\n").unwrap();
+    std::fs::write(dir.join("themes/aurora"), "quote = red\n").unwrap();
+    std::fs::write(dir.join("themes/Bad!"), "quote = red\n").unwrap();
+    std::fs::write(dir.join("themes/mono"), "quote = red\n").unwrap();
+    dir
+}
+
+#[test]
+fn list_user_themes_is_sorted_and_skips_invalid_shadowed_and_dirs() {
+    let dir = list_fixture("basic");
+    assert_eq!(
+        list_user_themes(&dir),
+        vec!["aurora".to_string(), "forest".to_string()]
+    );
+}
+
+#[test]
+fn list_user_themes_is_empty_without_a_themes_dir() {
+    let dir = std::env::temp_dir().join("mrkdup-theme-list-missing");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    assert!(list_user_themes(&dir).is_empty());
+}

@@ -98,14 +98,15 @@ theme = default    # default | light | mono
 | `top_margin_percent` | 3 | 0–40 | editor breathing room: % of pane height trimmed off the top |
 | `autosave_seconds` | 2 | 1–600 | idle seconds before a dirty buffer autosaves |
 | `tree_refresh_seconds` | 2 | 1–600 | seconds between automatic tree refreshes |
-| `theme` | `default` | see below | `default` (current look), `light` (dark fg for light terminals), `mono` (no color, modifiers only), or any other name — see Themes |
+| `theme` | `default` | see below | `default` (current look), `light` (dark fg for light terminals), `mono` (no color, modifiers only), `firmitas` (Omarchy navy/bronze/gold, truecolor), `tokyonight` (truecolor), or any other name — see Themes |
 
 ### Themes
 
-`theme` picks one of the three builtins (`default`, `light`, `mono`) by
+`theme` picks one of the five builtins (`default`, `light`, `mono`, `firmitas`, `tokyonight`) by
 name. Any other name (matching `^[a-z][a-z0-9_-]{0,31}$`) is looked up as
 a file at `$XDG_CONFIG_HOME/mrkdup/themes/<name>` — an unknown name or a
 missing file falls back to `default` with a warning in the status bar.
+`firmitas` and `tokyonight` are truecolor and set foregrounds only — they assume the matching terminal background (`#0c1928` / `#1a1b26`).
 
 On top of whichever theme that resolves to, mrkdup applies
 `$XDG_CONFIG_HOME/mrkdup/theme` if it exists — an overlay file that

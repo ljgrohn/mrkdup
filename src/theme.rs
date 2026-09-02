@@ -45,6 +45,19 @@ pub struct Theme {
     pub search_match: Style, // overlay; default = Black on Yellow
 }
 
+/// The shipped palettes, in the order the settings popup lists them.
+/// `Theme::named` and `is_builtin` both consult this list.
+pub const BUILTINS: &[&str] = &["default", "light", "mono", "firmitas", "tokyonight"];
+
+/// `#rrggbb` as a truecolor `Color`, for the builtin truecolor palettes.
+const fn rgb(hex: u32) -> Color {
+    Color::Rgb(
+        (hex >> 16) as u8,
+        ((hex >> 8) & 0xff) as u8,
+        (hex & 0xff) as u8,
+    )
+}
+
 impl Default for Theme {
     fn default() -> Theme {
         Theme {
@@ -153,12 +166,102 @@ impl Theme {
         }
     }
 
+    /// Omarchy "Firmitas Utilitas Venustas" (navy / limestone / bronze /
+    /// gold), foregrounds only — expects the theme's `#0c1928` terminal
+    /// background. Source: github.com/OldJobobo/omarchy-firmitas-utilitas-venustas-theme.
+    pub fn firmitas() -> Theme {
+        let navy = rgb(0x0c1928);
+        let graphite = rgb(0x514d46);
+        let muted = rgb(0x6f6b63);
+        let limestone = rgb(0xafaaa2);
+        let marble = rgb(0xd1ccc4);
+        let parchment = rgb(0xfeeecd);
+        let gold = rgb(0xcea462);
+        let sandstone = rgb(0xb49d80);
+        let travertine = rgb(0xd4bda2);
+        let gilded = rgb(0xe3bf79);
+        let bronze = rgb(0xad936d);
+        Theme {
+            name: "firmitas".to_string(),
+            border_focused: Style::default().fg(travertine),
+            border_unfocused: Style::default().fg(graphite),
+            popup_border: Style::default().fg(travertine),
+            status_bar: Style::default().fg(navy).bg(travertine),
+            selection: Style::default().fg(parchment).bg(graphite),
+            prompt_cursor: Style::default().add_modifier(Modifier::REVERSED),
+            welcome: Style::default().fg(muted),
+            tree_open: Style::default().fg(navy).bg(travertine),
+            text: Style::default().fg(limestone),
+            mark: Style::default().fg(muted),
+            heading1: Style::default().fg(gilded).add_modifier(Modifier::BOLD),
+            heading2: Style::default().fg(gold),
+            heading: Style::default().fg(travertine),
+            bold: Style::default().fg(marble).add_modifier(Modifier::BOLD),
+            italic: Style::default().fg(marble).add_modifier(Modifier::ITALIC),
+            code: Style::default().fg(sandstone),
+            checkbox: Style::default().fg(gilded),
+            done: Style::default().fg(muted),
+            quote: Style::default().fg(bronze),
+            link: Style::default()
+                .fg(travertine)
+                .add_modifier(Modifier::UNDERLINED),
+            bullet: Style::default().fg(gold),
+            html_tag: Style::default().fg(gilded),
+            html_attr: Style::default().fg(sandstone),
+            search_match: Style::default().fg(navy).bg(gilded),
+        }
+    }
+
+    /// Tokyo Night ("night" variant), foregrounds only — expects the
+    /// theme's `#1a1b26` terminal background.
+    pub fn tokyonight() -> Theme {
+        let bg = rgb(0x1a1b26);
+        let fg = rgb(0xc0caf5);
+        let comment = rgb(0x565f89);
+        let gutter = rgb(0x3b4261);
+        let visual = rgb(0x33467c);
+        let blue = rgb(0x7aa2f7);
+        let cyan = rgb(0x7dcfff);
+        let green = rgb(0x9ece6a);
+        let magenta = rgb(0xbb9af7);
+        let yellow = rgb(0xe0af68);
+        Theme {
+            name: "tokyonight".to_string(),
+            border_focused: Style::default().fg(blue),
+            border_unfocused: Style::default().fg(gutter),
+            popup_border: Style::default().fg(blue),
+            status_bar: Style::default().fg(bg).bg(blue),
+            selection: Style::default().fg(fg).bg(visual),
+            prompt_cursor: Style::default().add_modifier(Modifier::REVERSED),
+            welcome: Style::default().fg(comment),
+            tree_open: Style::default().fg(bg).bg(blue),
+            text: Style::default().fg(fg),
+            mark: Style::default().fg(comment),
+            heading1: Style::default().fg(blue).add_modifier(Modifier::BOLD),
+            heading2: Style::default().fg(blue),
+            heading: Style::default().fg(magenta),
+            bold: Style::default().fg(fg).add_modifier(Modifier::BOLD),
+            italic: Style::default().fg(fg).add_modifier(Modifier::ITALIC),
+            code: Style::default().fg(green),
+            checkbox: Style::default().fg(magenta),
+            done: Style::default().fg(comment),
+            quote: Style::default().fg(yellow),
+            link: Style::default().fg(blue).add_modifier(Modifier::UNDERLINED),
+            bullet: Style::default().fg(cyan),
+            html_tag: Style::default().fg(magenta),
+            html_attr: Style::default().fg(cyan),
+            search_match: Style::default().fg(bg).bg(yellow),
+        }
+    }
+
     /// The builtin named `name`, or `Theme::default()` if `name` isn't
     /// one of the builtins.
     pub fn named(name: &str) -> Theme {
         match name {
             "light" => Theme::light(),
             "mono" => Theme::mono(),
+            "firmitas" => Theme::firmitas(),
+            "tokyonight" => Theme::tokyonight(),
             _ => Theme::default(),
         }
     }
@@ -185,10 +288,10 @@ impl Theme {
     }
 }
 
-/// `default`, `light`, `mono` — the three shipped palettes. Anything
-/// else is a candidate for `themes/<name>` on disk.
+/// One of the shipped palettes (`BUILTINS`). Anything else is a
+/// candidate for `themes/<name>` on disk.
 fn is_builtin(name: &str) -> bool {
-    matches!(name, "default" | "light" | "mono")
+    BUILTINS.contains(&name)
 }
 
 /// One color-value token: a named color, `bright-<named>`, `#rrggbb`,
@@ -394,10 +497,30 @@ pub fn parse_overlay(text: &str, theme: &mut Theme) -> Vec<String> {
     warnings
 }
 
+/// Names of the user's theme files in `dir/themes/`, sorted. Skips
+/// names that fail `config::valid_theme_name`, names that shadow a
+/// builtin (the loader would pick the builtin anyway), and anything
+/// that isn't a regular file. A missing or unreadable directory is
+/// simply empty. Used by the settings popup to build its choice list.
+#[allow(dead_code)]
+pub fn list_user_themes(dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir.join("themes")) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_file())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| crate::config::valid_theme_name(n) && !is_builtin(n))
+        .collect();
+    names.sort();
+    names
+}
+
 /// Load the theme named `name` from `dir` (normally
 /// `$XDG_CONFIG_HOME/mrkdup`), applying the load order:
 ///
-/// 1. `Theme::named(name)` — one of the three builtins, or
+/// 1. `Theme::named(name)` — one of the `BUILTINS`, or
 ///    `Theme::default()` if `name` isn't a builtin.
 /// 2. If `name` isn't a builtin, `dir/themes/<name>` is read as an
 ///    overlay on top of `default`. A missing file is a warning

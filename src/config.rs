@@ -94,7 +94,7 @@ pub fn parse(text: &str) -> (Config, Vec<String>) {
 }
 
 /// `^[a-z][a-z0-9_-]{0,31}$`, hand-checked (no regex dependency).
-fn valid_theme_name(name: &str) -> bool {
+pub(crate) fn valid_theme_name(name: &str) -> bool {
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
         return false;
