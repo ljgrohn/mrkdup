@@ -11,11 +11,13 @@
   app.rs (fuzzy/search/checkbox) → cache wrap+highlight. No new
   features. Mark-hiding still deferred.
 
-- [ ] Ship it properly: crates.io + releases
-  Blocked on the harden plan above. Then: publish `mrkdup` to
-  crates.io (grabs the name), tag v0.1.0, add a CI badge to the
-  README, and set up cargo-dist (or a release workflow) so tagged
-  releases ship prebuilt binaries for mac/linux/windows.
+- [x] Ship it properly: crates.io + releases @done(2026-09-02)
+  v0.1.0 on crates.io and npm (npm/ wrapper downloads the release
+  binary); .github/workflows/release.yml builds mac/linux/windows
+  archives on a v* tag; README has CI/crates/npm badges. To release
+  again: bump version in Cargo.toml and npm/package.json, commit,
+  `git tag -a vX.Y.Z && git push origin vX.Y.Z`, wait for the release
+  run, `cargo publish`, then `cd npm && npm publish --access public`.
 
 - [x] Themes (after harden Package C; not a v0.1 blocker)
   Plan: docs/superpowers/plans/2026-08-31-mrkdup-themes.md
