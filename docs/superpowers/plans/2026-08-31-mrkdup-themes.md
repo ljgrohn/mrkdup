@@ -363,6 +363,7 @@ Grep gate for the last commit: `Color::` lives only in `src/theme.rs`.
 - No new dependencies (`toml`, `serde`, `syntect`).
 - No keybind remapping sneaking in on the same branch.
 - No stacking `Kind` (Heading+Bold). Themes don’t fix B3.
+- (2026-09-01: the picker popup and live switch landed after all — see specs/2026-09-01-settings-popup-design.md.)
 
 ---
 

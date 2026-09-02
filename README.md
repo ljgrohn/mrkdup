@@ -56,6 +56,7 @@ mrkdup [directory]   # defaults to the current directory
 | tree | + | zoom in: make the selected folder the tree root (a file: its folder) |
 | tree | . | toggle hidden files (dotfiles and anything matched by `.gitignore`) |
 | tree | ? | show the key cheat sheet (the launch page) over the editor; any key closes it |
+| tree | s | settings popup: h/l or ←/→ cycle the theme (applies live and is written to the config file); Esc closes |
 | editor | Ctrl+S | save (after a disk-conflict warning, a second Ctrl+S overwrites) |
 | editor | Ctrl+Z / Ctrl+Y | undo / redo |
 | editor | Ctrl+D | toggle checkbox on the line (`- [ ]` ↔ `- [x]`, `- [X]` → `- [ ]`; other lines gain a `- [ ] ` prefix; Ctrl+Z twice undoes) |
@@ -77,6 +78,10 @@ mrkdup reads `$XDG_CONFIG_HOME/mrkdup/config` at startup
 optional — no file means all defaults — and it never causes a crash:
 lines that can't be parsed (or name an unknown option) are ignored, with
 a one-line warning in the status bar.
+
+The `theme` key can also be changed from inside mrkdup: press `s` in the
+tree pane; the choice applies immediately and is written back to this
+file.
 
 The format is plain `key = value` lines; a line starting with `#` is a
 comment (inline comments after a value are not supported) and blank
@@ -114,8 +119,9 @@ On top of whichever theme that resolves to, mrkdup applies
 tweaks individual slots without redefining the whole palette. Both
 files use the same `key = value` format as the config file (`#`
 comments, blank lines, never fails — bad lines warn and are skipped,
-the rest still apply), and both are read once at startup — restart
-mrkdup to apply a change; there's no live reload or in-app theme switcher.
+the rest still apply), and both files are read when the theme is
+(re)applied — at startup, or when you pick a theme with `s` — so edit a
+theme file, then re-select the theme to see it; there's no file watcher.
 
 Each `value` is one or more colors and modifiers:
 

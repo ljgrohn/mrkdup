@@ -208,6 +208,33 @@ fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
         ];
         f.render_widget(Paragraph::new(lines), inner);
     }
+    if let Prompt::Settings { rows, selected } = &app.prompt {
+        let name_w = rows.iter().map(|r| r.name.len()).max().unwrap_or(0);
+        let value_w = rows.iter().map(|r| r.value().len()).max().unwrap_or(0);
+        let width = ((name_w + value_w + 12) as u16).max(40);
+        let height = (rows.len() as u16 + 2).min(area.height);
+        let popup = centered_rect(width, height, area);
+        f.render_widget(Clear, popup);
+        let block = popup_block(" Settings ", theme);
+        let inner = block.inner(popup);
+        f.render_widget(block, popup);
+        let lines: Vec<Line> = rows
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                let value = format!("‹ {} ›", r.value());
+                let gap = (inner.width as usize)
+                    .saturating_sub(r.name.len() + value.len() + 2)
+                    .max(1);
+                let mut line = Line::from(format!(" {}{}{} ", r.name, " ".repeat(gap), value));
+                if i == *selected {
+                    line = line.style(Style::default().add_modifier(Modifier::REVERSED));
+                }
+                line
+            })
+            .collect();
+        f.render_widget(Paragraph::new(lines), inner);
+    }
 }
 
 fn draw_tree(f: &mut Frame, app: &mut App, area: Rect) {
@@ -338,6 +365,7 @@ fn key_lines() -> Vec<Line<'static>> {
         ("u", "refresh"),
         ("Ctrl+B/Ctrl+T", "panes"),
         ("?", "help"),
+        ("s", "settings (theme)"),
         ("q", "quit"),
     ];
     KEYS.iter()

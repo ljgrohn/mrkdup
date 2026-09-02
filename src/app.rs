@@ -60,7 +60,6 @@ pub struct SettingRow {
 }
 
 impl SettingRow {
-    #[allow(dead_code)] // consumed by draw_popup (Task 4); tests use it today
     pub fn value(&self) -> &str {
         &self.choices[self.index]
     }
@@ -214,7 +213,7 @@ impl App {
             KeyCode::Char('G') => self.tree.move_bottom(),
             KeyCode::Char('.') => self.tree.toggle_hidden(),
             KeyCode::Char('?') => self.prompt = Prompt::Help,
-            KeyCode::Char('s') => self.open_settings(),
+            KeyCode::Char('s') if key.modifiers.is_empty() => self.open_settings(),
             KeyCode::Char('-') => self.tree.ascend(),
             KeyCode::Char('+') => self.tree.make_root(),
             KeyCode::Char('n') => self.prompt = Prompt::NewFile(String::new()),

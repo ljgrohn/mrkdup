@@ -1026,6 +1026,13 @@ fn s_in_tree_opens_settings_on_the_current_theme() {
 }
 
 #[test]
+fn ctrl_s_in_tree_does_not_open_settings() {
+    let mut app = App::new(fixture("settings-ctrl-s"), Config::default()).unwrap();
+    app.handle_key(ctrl('s'));
+    assert!(matches!(app.prompt, Prompt::None));
+}
+
+#[test]
 fn settings_l_and_h_cycle_the_theme_live_and_wrap() {
     let mut app = App::new(fixture("settings-cycle"), Config::default()).unwrap();
     assert!(

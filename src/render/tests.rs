@@ -16,6 +16,19 @@ fn draw_to_string(app: &mut App) -> String {
     format!("{:?}", terminal.backend().buffer())
 }
 
+// Wider than `draw_to_string`'s fixed 80 columns: the Settings status
+// line ("... — theme: light (not saved: no config dir)") runs past 80
+// cols and draw_status doesn't wrap, so an 80-col buffer truncates it.
+// A dedicated width keeps that assertion honest without touching the
+// shared 80-col helper, which `long_lines_soft_wrap_in_the_renderer`
+// depends on for its wrap-width assumption.
+fn draw_to_string_wide(app: &mut App) -> String {
+    let backend = TestBackend::new(110, 16);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, app)).unwrap();
+    format!("{:?}", terminal.backend().buffer())
+}
+
 fn fixture(tag: &str, content: &str) -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!("mrkdup-render-{tag}"));
     let _ = fs::remove_dir_all(&root);
@@ -222,4 +235,25 @@ fn cursor_tracks_into_scrolled_view() {
     let text = draw_to_string(&mut app);
     assert!(text.contains("line 150"), "cursor line not visible: {text}");
     assert!(app.editor_scroll > 0);
+}
+
+#[test]
+fn settings_popup_renders_the_theme_row_and_status() {
+    let root = fixture("settings-popup", "# Title\n");
+    let mut app = App::new(root, Config::default()).unwrap();
+    app.handle_key(key(KeyCode::Char('s')));
+    let text = draw_to_string(&mut app);
+    assert!(text.contains("Settings"), "title missing: {text}");
+    assert!(text.contains("theme"), "row name missing: {text}");
+    assert!(text.contains("‹ default ›"), "value missing: {text}");
+
+    app.handle_key(key(KeyCode::Char('l')));
+    // wide: the status hint below runs past 80 cols once the
+    // "(not saved: no config dir)" suffix is appended
+    let text = draw_to_string_wide(&mut app);
+    assert!(text.contains("‹ light ›"), "cycled value missing: {text}");
+    assert!(
+        text.contains("theme: light (not saved: no config dir)"),
+        "status missing from hint line: {text}"
+    );
 }
