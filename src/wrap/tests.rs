@@ -155,3 +155,58 @@ fn scroll_keeps_cursor_visible() {
     assert_eq!(scroll_top(8, 3, 10), 3); // cursor above -> scroll up
     assert_eq!(scroll_top(3, 3, 10), 3); // at top edge -> unchanged
 }
+
+#[test]
+fn hit_test_lands_on_the_clicked_char() {
+    let ls = lines(&["hello world"]);
+    let rows = layout(&ls, 20);
+    assert_eq!(hit_test(&rows, &ls, 0, 0), (0, 0));
+    assert_eq!(hit_test(&rows, &ls, 0, 4), (0, 4));
+    assert_eq!(hit_test(&rows, &ls, 0, 10), (0, 10));
+}
+
+#[test]
+fn hit_test_past_the_end_snaps_to_line_end() {
+    let ls = lines(&["hello"]);
+    let rows = layout(&ls, 20);
+    assert_eq!(hit_test(&rows, &ls, 0, 17), (0, 5));
+}
+
+#[test]
+fn hit_test_below_the_last_row_snaps_to_the_last_row() {
+    let ls = lines(&["one", "two"]);
+    let rows = layout(&ls, 20);
+    assert_eq!(hit_test(&rows, &ls, 9, 1), (1, 1));
+}
+
+#[test]
+fn hit_test_on_a_wrapped_row_stays_on_that_row() {
+    // "aaaa bbbb" at width 5 wraps to "aaaa " | "bbbb"
+    let ls = lines(&["aaaa bbbb"]);
+    let rows = layout(&ls, 5);
+    assert_eq!(rows.len(), 2);
+    // past the end of the first row: col 4 (the space), not 5 which
+    // cursor_position would draw at the start of the second row
+    assert_eq!(hit_test(&rows, &ls, 0, 9), (0, 4));
+    assert_eq!(cursor_position(&rows, &ls, (0, 4)).0, 0);
+    // second row maps from its own start
+    assert_eq!(hit_test(&rows, &ls, 1, 2), (0, 7));
+    assert_eq!(hit_test(&rows, &ls, 1, 9), (0, 9));
+}
+
+#[test]
+fn hit_test_counts_wide_chars_as_two_cells() {
+    let ls = lines(&["日本x"]);
+    let rows = layout(&ls, 20);
+    assert_eq!(hit_test(&rows, &ls, 0, 1), (0, 0)); // second cell of 日
+    assert_eq!(hit_test(&rows, &ls, 0, 2), (0, 1));
+    assert_eq!(hit_test(&rows, &ls, 0, 4), (0, 2));
+}
+
+#[test]
+fn hit_test_on_empty_document_is_origin() {
+    let ls = lines(&[""]);
+    let rows = layout(&ls, 20);
+    assert_eq!(hit_test(&rows, &ls, 3, 3), (0, 0));
+    assert_eq!(hit_test(&[], &ls, 0, 0), (0, 0));
+}

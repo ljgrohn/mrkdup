@@ -1160,3 +1160,239 @@ fn settings_side_padding_without_config_dir_applies_but_reports_unsaved() {
         Some("side_padding: 0 (not saved: no config dir)")
     );
 }
+
+// ---- mouse ----------------------------------------------------------
+
+use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+
+fn mouse(kind: MouseEventKind, x: u16, y: u16) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column: x,
+        row: y,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+fn down(x: u16, y: u16) -> MouseEvent {
+    mouse(MouseEventKind::Down(MouseButton::Left), x, y)
+}
+fn drag(x: u16, y: u16) -> MouseEvent {
+    mouse(MouseEventKind::Drag(MouseButton::Left), x, y)
+}
+fn up(x: u16, y: u16) -> MouseEvent {
+    mouse(MouseEventKind::Up(MouseButton::Left), x, y)
+}
+
+/// An app with a.md open and the pane rects a draw would have recorded:
+/// tree rows at x 1..29, editor text at x 32..72, both on rows 1..9.
+fn mouse_app(tag: &str) -> App {
+    let mut app = App::new(fixture(tag), Config::default()).unwrap();
+    app.handle_key(key(KeyCode::Enter)); // open a.md: "hello" / "world"
+    app.tree_area = Some(Rect::new(1, 1, 28, 8));
+    app.editor_area = Some(Rect::new(32, 1, 40, 8));
+    app
+}
+
+#[test]
+fn click_in_editor_lands_the_cursor() {
+    let mut app = mouse_app("click");
+    app.handle_key(key(KeyCode::Esc)); // focus the tree first
+    app.handle_mouse(down(35, 2)); // "world", col 3
+    app.handle_mouse(up(35, 2));
+    assert!(matches!(app.focus, Focus::Editor));
+    assert_eq!(app.editor.cursor(), (1, 3));
+    // a plain click leaves no selection behind
+    assert!(app.editor.selection_range().is_none());
+    assert!(app.clipboard.is_none());
+}
+
+#[test]
+fn click_past_the_end_of_a_line_snaps_to_its_end() {
+    let mut app = mouse_app("click-end");
+    app.handle_mouse(down(70, 1));
+    app.handle_mouse(up(70, 1));
+    assert_eq!(app.editor.cursor(), (0, 5));
+}
+
+#[test]
+fn drag_selects_and_release_copies() {
+    let mut app = mouse_app("drag");
+    app.handle_mouse(down(33, 1)); // "hello" col 1
+    app.handle_mouse(drag(34, 2)); // "world" col 2
+    assert_eq!(app.editor.selection_range(), Some(((0, 1), (1, 2))));
+    app.handle_mouse(up(34, 2));
+    // the selection stays visible and its text is queued for the clipboard
+    assert_eq!(app.editor.selection_range(), Some(((0, 1), (1, 2))));
+    assert_eq!(app.clipboard.as_deref(), Some("ello\nwo"));
+    assert_eq!(app.status.as_deref(), Some("copied to clipboard"));
+}
+
+#[test]
+fn drag_into_the_tree_pane_keeps_selecting_editor_text() {
+    let mut app = mouse_app("drag-tree");
+    app.handle_mouse(down(36, 2)); // "world" col 4
+                                   // wander left across the border into the tree pane, on row 1
+    app.handle_mouse(drag(5, 1));
+    // x clamps to the editor's left edge, so the anchor..cursor range is
+    // (0,0)..(1,4) — the tree is untouched
+    assert_eq!(app.editor.selection_range(), Some(((0, 0), (1, 4))));
+    assert_eq!(app.tree.selected(), 0);
+    assert!(matches!(app.focus, Focus::Editor));
+    app.handle_mouse(up(5, 1));
+    assert_eq!(app.clipboard.as_deref(), Some("hello\nworl"));
+}
+
+#[test]
+fn drag_above_the_pane_scrolls_one_row_per_event() {
+    let root = fixture("drag-scroll");
+    let body: String = (1..=30).map(|i| format!("line {i}\n")).collect();
+    fs::write(root.join("a.md"), body).unwrap();
+    let mut app = App::new(root, Config::default()).unwrap();
+    app.handle_key(key(KeyCode::Enter));
+    app.tree_area = Some(Rect::new(1, 1, 28, 8));
+    app.editor_area = Some(Rect::new(32, 1, 40, 8));
+    app.editor_scroll = 10; // rows 10..18 visible
+    app.handle_mouse(down(32, 4)); // line 13
+    app.handle_mouse(drag(32, 0)); // above the pane → row 9
+    assert_eq!(app.editor.cursor(), (9, 0));
+    app.editor_scroll = 9;
+    app.handle_mouse(drag(32, 0));
+    assert_eq!(app.editor.cursor(), (8, 0));
+    // and below it → the row just under the window
+    app.handle_mouse(drag(32, 20));
+    assert_eq!(app.editor.cursor(), (17, 0));
+}
+
+#[test]
+fn click_in_the_tree_selects_and_opens_that_row() {
+    let mut app = mouse_app("tree-click");
+    assert_eq!(app.editor.lines(), ["hello", "world"]);
+    app.handle_mouse(down(3, 2)); // second row: b.md
+    app.handle_mouse(up(3, 2));
+    assert_eq!(app.tree.selected(), 1);
+    assert_eq!(app.editor.lines(), ["bee"]);
+    assert!(matches!(app.focus, Focus::Editor));
+}
+
+#[test]
+fn click_on_empty_tree_space_only_focuses_the_tree() {
+    let mut app = mouse_app("tree-blank");
+    app.handle_mouse(down(3, 7)); // below the two rows
+    assert!(matches!(app.focus, Focus::Tree));
+    assert_eq!(app.tree.selected(), 0);
+    assert_eq!(app.editor.lines(), ["hello", "world"]);
+}
+
+#[test]
+fn wheel_moves_the_editor_cursor_three_lines() {
+    let root = fixture("wheel");
+    let body: String = (1..=30).map(|i| format!("line {i}\n")).collect();
+    fs::write(root.join("a.md"), body).unwrap();
+    let mut app = App::new(root, Config::default()).unwrap();
+    app.handle_key(key(KeyCode::Enter));
+    app.tree_area = Some(Rect::new(1, 1, 28, 8));
+    app.editor_area = Some(Rect::new(32, 1, 40, 8));
+    app.handle_mouse(mouse(MouseEventKind::ScrollDown, 40, 3));
+    assert_eq!(app.editor.cursor(), (3, 0));
+    app.handle_mouse(mouse(MouseEventKind::ScrollUp, 40, 3));
+    assert_eq!(app.editor.cursor(), (0, 0));
+    // over the tree the wheel moves the tree selection instead
+    app.handle_mouse(mouse(MouseEventKind::ScrollDown, 5, 3));
+    assert_eq!(app.tree.selected(), 1); // clamped: only two rows
+    assert_eq!(app.editor.cursor(), (0, 0));
+}
+
+#[test]
+fn mouse_is_ignored_while_a_prompt_is_open() {
+    let mut app = mouse_app("mouse-prompt");
+    app.handle_key(ctrl('f'));
+    app.handle_mouse(down(35, 2));
+    app.handle_mouse(up(35, 2));
+    assert!(matches!(app.prompt, Prompt::Search(_)));
+    assert_eq!(app.editor.cursor(), (0, 0));
+}
+
+#[test]
+fn mouse_does_nothing_without_recorded_pane_rects() {
+    let mut app = App::new(fixture("mouse-norect"), Config::default()).unwrap();
+    app.handle_key(key(KeyCode::Enter));
+    app.handle_mouse(down(35, 2));
+    app.handle_mouse(drag(36, 2));
+    app.handle_mouse(up(36, 2));
+    assert_eq!(app.editor.cursor(), (0, 0));
+    assert!(app.editor.selection_range().is_none());
+}
+
+// ---- search highlight / Ctrl+W --------------------------------------
+
+#[test]
+fn typing_clears_the_search_highlight() {
+    let mut app = App::new(fixture("hl-clear"), Config::default()).unwrap();
+    app.handle_key(key(KeyCode::Enter));
+    app.handle_key(ctrl('f'));
+    for c in "wor".chars() {
+        app.handle_key(key(KeyCode::Char(c)));
+    }
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(app.search_highlight.as_deref(), Some("wor"));
+    // cursor motion keeps it
+    app.handle_key(key(KeyCode::Left));
+    assert_eq!(app.search_highlight.as_deref(), Some("wor"));
+    // an edit drops it
+    app.handle_key(key(KeyCode::Char('x')));
+    assert!(app.search_highlight.is_none());
+    // Ctrl+G brings it back for the next match
+    app.handle_key(ctrl('g'));
+    assert_eq!(app.search_highlight.as_deref(), Some("wor"));
+}
+
+#[test]
+fn ctrl_w_saves_and_closes_the_file() {
+    let root = fixture("close");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    app.handle_key(key(KeyCode::Enter));
+    app.handle_key(key(KeyCode::Char('X')));
+    app.handle_key(ctrl('w'));
+    assert!(app.editor.path.is_none());
+    assert_eq!(app.editor.lines(), [""]);
+    assert!(!app.editor.dirty);
+    assert!(matches!(app.focus, Focus::Tree));
+    assert_eq!(app.status.as_deref(), Some("closed"));
+    assert_eq!(
+        fs::read_to_string(root.join("a.md")).unwrap(),
+        "Xhello\nworld\n"
+    );
+    // typing now hits the no-file guard rather than a phantom buffer
+    app.handle_key(key(KeyCode::Tab)); // reopen via the tree
+    assert_eq!(app.editor.lines(), ["Xhello", "world"]);
+}
+
+#[test]
+fn ctrl_w_with_a_disk_conflict_keeps_the_file_open() {
+    let root = fixture("close-conflict");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    app.handle_key(key(KeyCode::Enter));
+    app.handle_key(key(KeyCode::Char('X')));
+    // someone else writes the file with a newer mtime
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    fs::write(root.join("a.md"), "other\n").unwrap();
+    let future = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+    fs::File::open(root.join("a.md"))
+        .unwrap()
+        .set_modified(future)
+        .unwrap();
+    app.handle_key(ctrl('w'));
+    assert!(app.editor.path.is_some());
+    assert!(app.editor.dirty);
+    assert!(matches!(app.focus, Focus::Editor));
+    assert!(app.status.as_deref().unwrap().contains("conflict"));
+    assert_eq!(fs::read_to_string(root.join("a.md")).unwrap(), "other\n");
+}
+
+#[test]
+fn ctrl_w_with_no_file_open_is_a_noop() {
+    let mut app = App::new(fixture("close-none"), Config::default()).unwrap();
+    app.handle_key(ctrl('w'));
+    assert!(app.status.is_none());
+    assert!(matches!(app.focus, Focus::Tree));
+}

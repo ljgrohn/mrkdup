@@ -100,6 +100,43 @@ pub fn cursor_position(
     (result, 0)
 }
 
+/// Map a screen hit — visual row index `vrow` and `x` cells from the
+/// pane's left edge — back to a logical (line, char col). The inverse of
+/// `cursor_position`, used to land the cursor on a mouse click.
+///
+/// `vrow` past the last row snaps to the last row. `x` past the row's
+/// text snaps to the row's end — or, on a row that wraps into another,
+/// one before it, so the cursor stays on the clicked row instead of
+/// rendering at the start of the next one (`cursor_position` puts a
+/// cursor at `end` on the following row). A row that's a single char
+/// wide can't do that and lands on its start instead.
+pub fn hit_test(rows: &[VisualRow], lines: &[String], vrow: usize, x: usize) -> (usize, usize) {
+    let ri = vrow.min(rows.len().saturating_sub(1));
+    let Some(row) = rows.get(ri) else {
+        return (0, 0);
+    };
+    let is_last_row_of_line = rows.get(ri + 1).is_none_or(|next| next.line != row.line);
+    let mut cells = 0;
+    for (ci, ch) in lines[row.line]
+        .chars()
+        .enumerate()
+        .take(row.end)
+        .skip(row.start)
+    {
+        let w = ch_width(ch).max(1);
+        if x < cells + w {
+            return (row.line, ci);
+        }
+        cells += w;
+    }
+    let col = if is_last_row_of_line {
+        row.end
+    } else {
+        row.end.saturating_sub(1).max(row.start)
+    };
+    (row.line, col)
+}
+
 /// Adjust vertical scroll (in visual rows) so `cursor_row` is visible.
 pub fn scroll_top(current_top: usize, cursor_row: usize, height: usize) -> usize {
     let height = height.max(1);

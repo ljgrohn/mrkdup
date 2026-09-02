@@ -250,3 +250,44 @@ fn mixed_endings_first_line_terminator_wins_crlf() {
         lf_count, crlf_count
     );
 }
+
+#[test]
+fn selected_text_spans_lines_and_is_none_when_empty() {
+    let mut ed = Editor::new();
+    ed.textarea = TextArea::from(["hello", "big", "world"]);
+    assert!(ed.selected_text().is_none());
+    ed.set_cursor(0, 2);
+    ed.start_selection();
+    assert!(ed.selected_text().is_none()); // anchor == cursor
+    ed.set_cursor(2, 3);
+    assert_eq!(ed.selected_text().as_deref(), Some("llo\nbig\nwor"));
+    // a backwards drag yields the same ordered text
+    ed.cancel_selection();
+    ed.set_cursor(2, 3);
+    ed.start_selection();
+    ed.set_cursor(0, 2);
+    assert_eq!(ed.selected_text().as_deref(), Some("llo\nbig\nwor"));
+    // single line
+    ed.cancel_selection();
+    ed.set_cursor(1, 0);
+    ed.start_selection();
+    ed.set_cursor(1, 2);
+    assert_eq!(ed.selected_text().as_deref(), Some("bi"));
+}
+
+#[test]
+fn close_returns_to_the_pathless_empty_state() {
+    let p = tmpfile("close", "hello\r\nworld\r\n");
+    let mut ed = Editor::new();
+    ed.open(&p).unwrap();
+    ed.textarea.insert_str("!");
+    ed.mark_dirty();
+    ed.close();
+    assert!(ed.path.is_none());
+    assert!(!ed.dirty);
+    assert_eq!(ed.lines(), [""]);
+    assert_eq!(ed.newline, Newline::Lf);
+    assert!(matches!(ed.save(false).unwrap(), SaveOutcome::NoFile));
+    // nothing was written back
+    assert_eq!(fs::read_to_string(&p).unwrap(), "hello\r\nworld\r\n");
+}

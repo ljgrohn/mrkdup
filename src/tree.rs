@@ -84,6 +84,17 @@ impl Tree {
         self.selected = 0;
     }
 
+    /// Select row `i` directly (a mouse click). Returns `false`, leaving
+    /// the selection alone, when there is no such row.
+    pub fn select(&mut self, i: usize) -> bool {
+        if i < self.rows.len() {
+            self.selected = i;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn move_bottom(&mut self) {
         self.selected = self.rows.len().saturating_sub(1);
     }

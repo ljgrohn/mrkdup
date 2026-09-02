@@ -293,3 +293,43 @@ fn tree_pane_width_comes_from_config() {
     assert_eq!(buf.cell((20u16, 0u16)).unwrap().symbol(), "┐");
     assert_eq!(buf.cell((21u16, 0u16)).unwrap().symbol(), "┌");
 }
+
+#[test]
+fn draw_records_the_pane_rects_for_mouse_hit_testing() {
+    let root = std::env::temp_dir().join("mrkdup-ui-rects");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("a.md"), "x\n").unwrap();
+    let config = Config {
+        side_padding: 0,
+        side_margin_percent: 0,
+        top_margin_percent: 0,
+        ..Config::default()
+    };
+    let mut app = App::new(root, config).unwrap();
+    let backend = TestBackend::new(60, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    // welcome page: the tree rect is known, the editor's is not
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    assert_eq!(app.tree_area, Some(Rect::new(1, 1, 28, 9)));
+    assert_eq!(app.editor_area, None);
+
+    // a file open: the editor's text rect sits inside its border
+    app.handle_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Enter,
+        crossterm::event::KeyModifiers::NONE,
+    ));
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    assert_eq!(app.tree_area, Some(Rect::new(1, 1, 28, 9)));
+    assert_eq!(app.editor_area, Some(Rect::new(31, 1, 28, 9)));
+
+    // hiding the tree drops its rect and widens the editor's
+    app.handle_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('b'),
+        crossterm::event::KeyModifiers::CONTROL,
+    ));
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    assert_eq!(app.tree_area, None);
+    assert_eq!(app.editor_area, Some(Rect::new(1, 1, 58, 9)));
+}

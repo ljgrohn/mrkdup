@@ -42,6 +42,7 @@ mrkdup [directory]   # defaults to the current directory
 | global | Ctrl+T | show/hide editor pane (tree goes full width) |
 | global | Ctrl+P (tree: p) | go to file (fuzzy finder popup: type to filter, ↑/↓ or Ctrl+J/K choose, Enter opens) |
 | global | Ctrl+Q / Ctrl+C (tree: q) | quit (works even in prompts; autosaves; if disk changed, warns — press again to discard) |
+| global | Ctrl+W | close the open file (autosaves; a disk conflict keeps it open, as when switching files) — back to the launch page with the tree focused |
 | editor | Esc / Shift+Tab | focus tree |
 | tree | Enter / Tab | open file (or expand/collapse dir) |
 | tree | j/k, ↑/↓ | move selection |
@@ -65,6 +66,19 @@ mrkdup [directory]   # defaults to the current directory
 | editor | Ctrl+J / Ctrl+K | next / previous word |
 | editor | Opt+J / Opt+K | next / previous paragraph |
 | editor | Cmd+J / Cmd+K | end / start of line |
+
+### Mouse
+
+mrkdup takes over the mouse, so a click and a drag act on the pane they land in instead of the terminal painting one selection across the tree and the editor together.
+
+| Where | Action |
+|---|---|
+| editor | click lands the cursor (and focuses the editor); drag selects; the selection is confined to the editor pane — drag over the tree or past the top/bottom edge and it keeps extending (scrolling a row at a time) |
+| editor | releasing a drag copies the selection to the system clipboard through OSC 52 (iTerm2, kitty, WezTerm, Ghostty, Alacritty, foot, tmux with `set-clipboard on`; Terminal.app ignores it) |
+| editor | wheel moves the cursor three lines |
+| tree | click selects the row and opens it (a folder toggles), like Enter; wheel moves the selection three rows |
+
+Hold Shift while dragging to get the terminal's own selection back (Option in some macOS terminals).
 
 The Cmd motions need a terminal that supports the kitty keyboard
 protocol (Ghostty, kitty, WezTerm, recent iTerm2) — mrkdup enables it

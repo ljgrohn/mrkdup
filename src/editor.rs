@@ -161,6 +161,51 @@ impl Editor {
         self.textarea.cancel_selection();
     }
 
+    /// Anchor a selection at the cursor; later cursor moves extend it.
+    pub fn start_selection(&mut self) {
+        self.textarea.start_selection();
+    }
+
+    /// The selected text, lines joined with `\n`; `None` when there is
+    /// no selection or it is empty (anchor == cursor).
+    pub fn selected_text(&self) -> Option<String> {
+        let ((sr, sc), (er, ec)) = self.selection_range()?;
+        if (sr, sc) == (er, ec) {
+            return None;
+        }
+        let lines = self.textarea.lines();
+        let slice = |row: usize, from: usize, to: Option<usize>| -> String {
+            let line = lines.get(row).map(String::as_str).unwrap_or("");
+            let it = line.chars().skip(from);
+            match to {
+                Some(to) => it.take(to.saturating_sub(from)).collect(),
+                None => it.collect(),
+            }
+        };
+        if sr == er {
+            return Some(slice(sr, sc, Some(ec)));
+        }
+        let mut out = slice(sr, sc, None);
+        for row in sr + 1..er {
+            out.push('\n');
+            out.push_str(&slice(row, 0, None));
+        }
+        out.push('\n');
+        out.push_str(&slice(er, 0, Some(ec)));
+        Some(out)
+    }
+
+    /// Drop the open document: back to the empty, pathless state `new`
+    /// starts in. The caller saves first; this never touches disk.
+    pub fn close(&mut self) {
+        self.textarea = make_textarea(Vec::new());
+        self.path = None;
+        self.dirty = false;
+        self.mtime = None;
+        self.newline = Newline::Lf;
+        self.layout_cache.invalidate();
+    }
+
     pub fn selection_range(&self) -> Option<((usize, usize), (usize, usize))> {
         self.textarea.selection_range()
     }

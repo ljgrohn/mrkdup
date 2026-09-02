@@ -2,7 +2,8 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Rect;
 use ratatui_textarea::{CursorMove, Input};
 
 use crate::config::Config;
@@ -92,8 +93,21 @@ pub struct App {
     pub last_tree_refresh: Instant,
     /// vertical scroll of the editor renderer, in visual rows
     pub editor_scroll: usize,
-    /// the query whose matches the renderer highlights (cleared on open)
+    /// the query whose matches the renderer highlights (cleared on open
+    /// and on the next edit)
     pub search_highlight: Option<String>,
+    /// The editor pane's text rect as of the last frame — `None` until
+    /// the first draw, while the pane is hidden, or while the welcome
+    /// page covers it. Mouse events hit-test against it.
+    pub editor_area: Option<Rect>,
+    /// The tree pane's rows rect as of the last frame (`None` when the
+    /// pane is hidden).
+    pub tree_area: Option<Rect>,
+    /// Text a mouse selection wants on the system clipboard; `main.rs`
+    /// drains it into an OSC 52 write after each event.
+    pub clipboard: Option<String>,
+    /// A left-button drag that began in the editor pane is in progress.
+    dragging: bool,
     pending_quit: bool,
     force_next_save: bool,
     last_search: String,
@@ -134,6 +148,10 @@ impl App {
             last_tree_refresh: Instant::now(),
             editor_scroll: 0,
             search_highlight: None,
+            editor_area: None,
+            tree_area: None,
+            clipboard: None,
+            dragging: false,
             pending_quit: false,
             force_next_save: false,
             last_search: String::new(),
@@ -157,6 +175,7 @@ impl App {
                 }
             }
             (true, KeyCode::Char('p')) => self.open_go_to_file(),
+            (true, KeyCode::Char('w')) => self.close_file(),
             // Ctrl+T, not Ctrl+E: macOS terminals send Ctrl+E for Cmd+Right
             (true, KeyCode::Char('t')) => {
                 self.editor_visible = !self.editor_visible;
@@ -201,6 +220,97 @@ impl App {
             self.tree.refresh();
             self.last_tree_refresh = Instant::now();
         }
+    }
+
+    /// Mouse input. The app owns the mouse (see `main.rs`), so this is
+    /// where clicks land the cursor, drags select, and the wheel scrolls;
+    /// everything is confined to the pane it started in — a drag that
+    /// wanders over the tree keeps selecting editor text. Ignored while
+    /// a prompt is open.
+    pub fn handle_mouse(&mut self, m: MouseEvent) {
+        if !matches!(self.prompt, Prompt::None) {
+            return;
+        }
+        let (x, y) = (m.column, m.row);
+        match m.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.status = None;
+                if let Some(area) = self.editor_area.filter(|a| contains(*a, x, y)) {
+                    self.focus = Focus::Editor;
+                    let (row, col) = self.editor_hit(area, x, y);
+                    self.editor.cancel_selection();
+                    self.editor.set_cursor(row, col);
+                    self.editor.start_selection();
+                    self.dragging = true;
+                } else if let Some(area) = self.tree_area.filter(|a| contains(*a, x, y)) {
+                    self.focus = Focus::Tree;
+                    let i = self.tree_scroll + (y - area.y) as usize;
+                    if self.tree.select(i) {
+                        self.open_selected();
+                    }
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.dragging => {
+                if let Some(area) = self.editor_area {
+                    let (row, col) = self.editor_hit(area, x, y);
+                    self.editor.set_cursor(row, col);
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) if self.dragging => {
+                self.dragging = false;
+                match self.editor.selected_text() {
+                    Some(text) => {
+                        self.status = Some("copied to clipboard".into());
+                        self.clipboard = Some(text);
+                    }
+                    // a plain click: no selection to keep
+                    None => self.editor.cancel_selection(),
+                }
+            }
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                let up = matches!(m.kind, MouseEventKind::ScrollUp);
+                if self.editor_area.is_some_and(|a| contains(a, x, y)) {
+                    // plain cursor motion, like the arrow keys (which also
+                    // drop any selection)
+                    self.editor.cancel_selection();
+                    let mv = if up { CursorMove::Up } else { CursorMove::Down };
+                    for _ in 0..3 {
+                        self.editor.move_cursor(mv);
+                    }
+                } else if self.tree_area.is_some_and(|a| contains(a, x, y)) {
+                    for _ in 0..3 {
+                        if up {
+                            self.tree.move_up();
+                        } else {
+                            self.tree.move_down();
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The (line, col) under screen cell (`x`, `y`) given the editor's
+    /// text rect. Points outside the rect clamp to it: above the pane
+    /// resolves to the row just above the visible window and below it to
+    /// the row just under, so a drag past either edge scrolls one row
+    /// per event; left/right of it snap to the row's ends.
+    fn editor_hit(&mut self, area: Rect, x: u16, y: u16) -> (usize, usize) {
+        let file_kind = crate::highlight::file_kind(self.editor.path.as_deref());
+        let scroll = self.editor_scroll;
+        let height = area.height as usize;
+        let vrow = if y < area.y {
+            scroll.saturating_sub(1)
+        } else if (y - area.y) as usize >= height {
+            scroll + height
+        } else {
+            scroll + (y - area.y) as usize
+        };
+        let xcell = x.saturating_sub(area.x) as usize;
+        let (lines, cache) = self.editor.render_parts();
+        let (rows, _) = cache.ensure(lines, area.width as usize, file_kind);
+        crate::wrap::hit_test(rows, lines, vrow, xcell)
     }
 
     fn tree_key(&mut self, key: KeyEvent) {
@@ -447,6 +557,38 @@ impl App {
         }
     }
 
+    /// Ctrl+W: autosave and close the open document, back to the welcome
+    /// page with the tree focused. A disk conflict or a failed save keeps
+    /// the file open, exactly as when switching files.
+    fn close_file(&mut self) {
+        if self.editor.path.is_none() {
+            return;
+        }
+        match self.editor.save(false) {
+            Ok(SaveOutcome::Conflict) => {
+                self.status = Some("unsaved changes conflict with disk — Ctrl+S to resolve".into());
+                self.force_next_save = true;
+                self.focus = Focus::Editor;
+                return;
+            }
+            Err(e) => {
+                self.status = Some(format!("save failed: {e}"));
+                return;
+            }
+            Ok(_) => {}
+        }
+        self.editor.close();
+        self.search_highlight = None;
+        self.editor_scroll = 0;
+        self.editor_area = None;
+        self.dragging = false;
+        self.focus = Focus::Tree;
+        self.force_next_save = false;
+        self.pending_quit = false;
+        self.last_edit = None;
+        self.status = Some("closed".into());
+    }
+
     fn editor_key(&mut self, key: KeyEvent) {
         // no file open: the welcome pane covers the textarea, so typing
         // would silently go into a buffer that can never be saved
@@ -571,6 +713,8 @@ impl App {
     }
 
     fn note_edit(&mut self) {
+        // the highlighted matches are stale once the text changes
+        self.search_highlight = None;
         self.editor.mark_dirty();
         self.last_edit = Some(Instant::now());
         self.force_next_save = false;
@@ -801,6 +945,11 @@ impl App {
             }
         }
     }
+}
+
+/// Whether screen cell (`x`, `y`) lies inside `r`.
+fn contains(r: Rect, x: u16, y: u16) -> bool {
+    x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
 }
 
 #[cfg(test)]

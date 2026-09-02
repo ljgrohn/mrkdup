@@ -18,6 +18,9 @@ fn border_style(focused: bool, theme: &Theme) -> Style {
 pub fn draw(f: &mut Frame, app: &mut App) {
     let area = with_side_padding(f.area(), app.config.side_padding);
     let [main, status] = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
+    // a hidden pane (or a covered editor) must not keep last frame's rect
+    app.editor_area = None;
+    app.tree_area = None;
 
     if app.tree_visible && app.editor_visible {
         let [tree_area, editor_area] = Layout::horizontal([
@@ -259,6 +262,7 @@ fn draw_tree(f: &mut Frame, app: &mut App, area: Rect) {
         .title(root_name);
     let inner = block.inner(area);
     f.render_widget(block, area);
+    app.tree_area = Some(inner);
 
     let height = inner.height as usize;
     let selected = app.tree.selected();
@@ -338,6 +342,7 @@ fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
         draw_welcome(f, inner, &app.theme);
         return;
     }
+    app.editor_area = Some(inner);
     // our renderer: soft wrap + live syntax styling + terminal cursor
     // (only drawn when the editor has focus)
     let cursor = app.editor.cursor();
@@ -374,6 +379,7 @@ fn key_lines() -> Vec<Line<'static>> {
         ("Ctrl+B/Ctrl+T", "panes"),
         ("?", "help"),
         ("s", "settings"),
+        ("Ctrl+W", "close file"),
         ("q", "quit"),
     ];
     KEYS.iter()

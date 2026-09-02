@@ -311,3 +311,17 @@ fn empty_directory_yields_no_rows_and_no_panic() {
     t.expand();
     t.collapse();
 }
+
+#[test]
+fn select_takes_an_index_and_rejects_out_of_range() {
+    let root = std::env::temp_dir().join("mrkdup-tree-select");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("a.md"), "").unwrap();
+    fs::write(root.join("b.md"), "").unwrap();
+    let mut t = Tree::new(root).unwrap();
+    assert!(t.select(1));
+    assert_eq!(t.selected(), 1);
+    assert!(!t.select(2));
+    assert_eq!(t.selected(), 1);
+}
