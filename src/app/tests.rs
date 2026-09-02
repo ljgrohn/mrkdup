@@ -1403,7 +1403,10 @@ fn ctrl_w_with_a_disk_conflict_keeps_the_file_open() {
     std::thread::sleep(std::time::Duration::from_millis(20));
     fs::write(root.join("a.md"), "other\n").unwrap();
     let future = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
-    fs::File::open(root.join("a.md"))
+    // a write handle: Windows refuses set_modified on a read-only one
+    fs::OpenOptions::new()
+        .write(true)
+        .open(root.join("a.md"))
         .unwrap()
         .set_modified(future)
         .unwrap();
