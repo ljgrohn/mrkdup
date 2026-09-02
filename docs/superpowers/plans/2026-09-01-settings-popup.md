@@ -1006,9 +1006,364 @@ git commit -m "feat: settings popup rendering, s in the cheat sheet, docs"
 
 ---
 
+### Task 5: `side_padding` — inset the panes from the terminal edges, second settings row
+
+Added after the user asked for left/right padding from the terminal sides (option 2 in chat: an mrkdup config key rather than terminal padding). Spec addendum: `docs/superpowers/specs/2026-09-01-settings-popup-design.md` § "side_padding".
+
+**Files:**
+- Modify: `src/config.rs` (`Config` field + default, parser arm, generalize the writer: `rewrite_theme_line` → `rewrite_key_line`, `save_theme_name_to` → `save_key_to`, `is_theme_line` → `is_key_line`)
+- Modify: `src/config/tests.rs` (rename call sites, add key/clamp tests)
+- Modify: `src/ui.rs` (`draw` insets `f.area()`; `key_lines` label)
+- Modify: `src/app.rs` (`open_settings` second row; `apply_setting` per-row match + `persist_setting`)
+- Test: `src/app/tests.rs`, `src/render/tests.rs`
+- Modify: `README.md` (config table row, sample, Keys row wording)
+
+**Interfaces:**
+- Consumes: `SettingRow`, `Prompt::Settings`, `App.config_dir`, `fsutil::atomic_write`.
+- Produces: `Config.side_padding: u16` (0..=20, default 1); `config::rewrite_key_line(text, key, value) -> String`; `config::save_key_to(path, key, value) -> io::Result<()>`. The theme-specific names are removed (their tests are renamed, assertions unchanged).
+
+- [ ] **Step 1: Failing config tests**
+
+In `src/config/tests.rs`, change every `rewrite_theme_line(X, N)` call to `rewrite_key_line(X, "theme", N)` and every `save_theme_name_to(P, N)` to `save_key_to(P, "theme", N)` (assertions unchanged). Then append:
+
+```rust
+#[test]
+fn side_padding_parses_clamps_and_defaults() {
+    assert_eq!(Config::default().side_padding, 1);
+    let (cfg, warnings) = parse("side_padding = 3\n");
+    assert!(warnings.is_empty());
+    assert_eq!(cfg.side_padding, 3);
+    let (cfg, _) = parse("side_padding = 99\n");
+    assert_eq!(cfg.side_padding, 20);
+    let (cfg, _) = parse("side_padding = -4\n");
+    assert_eq!(cfg.side_padding, 0);
+    let (_, warnings) = parse("side_padding = wide\n");
+    assert!(warnings[0].contains("not a number"));
+}
+
+#[test]
+fn rewrite_key_line_is_generic_over_the_key() {
+    assert_eq!(
+        rewrite_key_line("theme = light\n", "side_padding", "2"),
+        "theme = light\nside_padding = 2\n"
+    );
+    assert_eq!(
+        rewrite_key_line("side_padding = 1\nside_padding_x = 9\n", "side_padding", "3"),
+        "side_padding = 3\nside_padding_x = 9\n"
+    );
+}
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `cargo test config::tests:: 2>&1 | tail -8`
+Expected: compile errors — `no field side_padding`, `cannot find function rewrite_key_line` / `save_key_to`.
+
+- [ ] **Step 3: Implement in `src/config.rs`**
+
+Field, after `tree_refresh_seconds`:
+
+```rust
+    /// Columns of empty space between the terminal edges and the panes
+    /// (0..=20). Padding *outside* the borders; `side_margin_percent`
+    /// is the text margin inside the editor pane.
+    pub side_padding: u16,
+```
+
+Default: `side_padding: 1,`.
+
+Parser: add `| "side_padding"` to the numeric-key list and the inner arm
+`"side_padding" => cfg.side_padding = v.clamp(0, 20) as u16,`.
+
+Writer — replace the three theme-specific fns with:
+
+```rust
+/// `text` with the first `<key> = …` line replaced by `<key> = <value>`
+/// (leading indentation kept; the parser has no inline comments, so the
+/// whole rest of the line is the value), or with `<key> = <value>`
+/// appended when no such line exists. Commented-out lines and keys that
+/// merely start with `key` (`theme_name` for `theme`) don't count. Other
+/// lines are copied verbatim; the output always ends in `\n`. Pure, so
+/// the settings popup's write-back is testable without disk.
+pub fn rewrite_key_line(text: &str, key: &str, value: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 32);
+    let mut replaced = false;
+    for line in text.lines() {
+        if !replaced && is_key_line(line, key) {
+            let indent = &line[..line.len() - line.trim_start().len()];
+            out.push_str(indent);
+            out.push_str(key);
+            out.push_str(" = ");
+            out.push_str(value);
+            replaced = true;
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    if !replaced {
+        out.push_str(key);
+        out.push_str(" = ");
+        out.push_str(value);
+        out.push('\n');
+    }
+    out
+}
+
+/// `key` followed by optional spaces and `=`, after any indentation.
+fn is_key_line(line: &str, key: &str) -> bool {
+    line.trim_start()
+        .strip_prefix(key)
+        .map(|rest| rest.trim_start().starts_with('='))
+        .unwrap_or(false)
+}
+
+/// Persist one `key = value` in the config file at `path`: read it
+/// (missing = empty), rewrite the line, write atomically. Creates the
+/// parent directory if needed. Only the settings popup calls this —
+/// startup never writes the config.
+pub fn save_key_to(path: &Path, key: &str, value: &str) -> io::Result<()> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e),
+    };
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    crate::fsutil::atomic_write(path, rewrite_key_line(&text, key, value).as_bytes())
+}
+```
+
+Then fix the one call site in `src/app.rs` (`save_theme_name_to(&dir.join("config"), value)` → `save_key_to(&dir.join("config"), "theme", value)`) so the crate compiles; Step 7 restructures it further.
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `cargo test config::tests:: 2>&1 | tail -5`
+Expected: all config tests pass.
+
+- [ ] **Step 5: Failing render test**
+
+Append to `src/render/tests.rs`:
+
+```rust
+fn draw_buffer(app: &mut App) -> ratatui::buffer::Buffer {
+    let backend = TestBackend::new(80, 16);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, app)).unwrap();
+    terminal.backend().buffer().clone()
+}
+
+#[test]
+fn side_padding_insets_the_panes_from_the_terminal_edges() {
+    let root = fixture("side-padding", "# Title\n");
+    let cfg = Config {
+        side_padding: 3,
+        ..Config::default()
+    };
+    let mut app = App::new(root, cfg).unwrap();
+    let buf = draw_buffer(&mut app);
+    for x in 0..3u16 {
+        assert_eq!(buf[(x, 0)].symbol(), " ", "left padding column {x}");
+        assert_eq!(buf[(79 - x, 0)].symbol(), " ", "right padding column {}", 79 - x);
+    }
+    assert_ne!(buf[(3, 0)].symbol(), " ", "tree border should start at column 3");
+    assert_ne!(buf[(76, 0)].symbol(), " ", "editor border should end at column 76");
+
+    // default is one column
+    let mut app = App::new(fixture("side-padding-default", "# Title\n"), Config::default()).unwrap();
+    let buf = draw_buffer(&mut app);
+    assert_eq!(buf[(0, 0)].symbol(), " ");
+    assert_ne!(buf[(1, 0)].symbol(), " ");
+}
+```
+
+- [ ] **Step 6: Run to verify it fails, then implement in `src/ui.rs`**
+
+Run: `cargo test render::tests::side_padding 2>&1 | tail -5`
+Expected: FAIL on `left padding column 0` (border drawn at x=0).
+
+In `draw`:
+
+```rust
+pub fn draw(f: &mut Frame, app: &mut App) {
+    let area = with_side_padding(f.area(), app.config.side_padding);
+    let [main, status] =
+        Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
+```
+
+Add near `with_side_margins`:
+
+```rust
+/// Inset `r` by `pad` columns on each side — empty terminal background
+/// between the edges and the panes. Capped so at least half the width
+/// survives on tiny terminals.
+fn with_side_padding(r: Rect, pad: u16) -> Rect {
+    let pad = pad.min(r.width / 4);
+    Rect {
+        x: r.x + pad,
+        width: r.width.saturating_sub(pad * 2),
+        ..r
+    }
+}
+```
+
+In `key_lines`, change `("s", "settings (theme)")` to `("s", "settings")`.
+
+Run: `cargo test render::tests::side_padding 2>&1 | tail -5` — expected PASS.
+
+- [ ] **Step 7: Failing app tests, then the second row**
+
+Append to `src/app/tests.rs`:
+
+```rust
+#[test]
+fn settings_second_row_cycles_side_padding_and_persists() {
+    let root = fixture("settings-padding");
+    let cfg_dir = root.parent().unwrap().join("xdg");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
+    std::fs::write(cfg_dir.join("config"), "theme = default\n").unwrap();
+    let mut app = App::new(root, Config::default()).unwrap();
+    app.config_dir = Some(cfg_dir.clone());
+
+    app.handle_key(key(KeyCode::Char('s')));
+    let Prompt::Settings { rows, selected } = &app.prompt else {
+        panic!("expected Settings prompt");
+    };
+    assert_eq!(*selected, 0);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1].name, "side_padding");
+    assert_eq!(rows[1].value(), "1");
+    assert_eq!(rows[1].choices.len(), 21);
+
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Char('l')));
+    assert_eq!(app.config.side_padding, 2);
+    assert_eq!(app.status.as_deref(), Some("side_padding: 2"));
+    assert_eq!(
+        std::fs::read_to_string(cfg_dir.join("config")).unwrap(),
+        "theme = default\nside_padding = 2\n"
+    );
+
+    // j clamps at the last row; h wraps 0 → 20
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('h')));
+    assert_eq!(app.config.side_padding, 20);
+}
+
+#[test]
+fn settings_side_padding_without_config_dir_applies_but_reports_unsaved() {
+    let mut app = App::new(fixture("settings-padding-nodir"), Config::default()).unwrap();
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_key(key(KeyCode::Down));
+    app.handle_key(key(KeyCode::Left));
+    assert_eq!(app.config.side_padding, 0);
+    assert_eq!(
+        app.status.as_deref(),
+        Some("side_padding: 0 (not saved: no config dir)")
+    );
+}
+```
+
+Run: `cargo test app::tests::settings_second_row app::tests::settings_side_padding 2>&1 | tail -5` — expected FAIL (`rows.len()` is 1).
+
+In `src/app.rs`, `open_settings` builds two rows:
+
+```rust
+        let padding_choices: Vec<String> = (0..=20u16).map(|n| n.to_string()).collect();
+        let padding_index = (self.config.side_padding as usize).min(20);
+        self.prompt = Prompt::Settings {
+            rows: vec![
+                SettingRow {
+                    name: "theme",
+                    choices,
+                    index,
+                },
+                SettingRow {
+                    name: "side_padding",
+                    choices: padding_choices,
+                    index: padding_index,
+                },
+            ],
+            selected: 0,
+        };
+```
+
+Replace `apply_setting` with a per-row match plus a shared persist step. Status strings for `theme` are unchanged, so Task 3's tests keep passing:
+
+```rust
+    /// A settings row changed: apply the new value live and persist it
+    /// as `<row> = <value>` in the config file. The theme goes through
+    /// `load_from` so `themes/<name>` and the overlay file both apply,
+    /// exactly as at startup.
+    fn apply_setting(&mut self, row: &str, value: &str) {
+        let mut warnings: Vec<String> = Vec::new();
+        match row {
+            "theme" => {
+                self.theme = match &self.config_dir {
+                    Some(dir) => {
+                        let (theme, w) = crate::theme::load_from(value, dir);
+                        warnings = w;
+                        theme
+                    }
+                    None => Theme::named(value),
+                };
+                self.config.theme_name = value.to_string();
+            }
+            "side_padding" => {
+                self.config.side_padding = value.parse::<u16>().unwrap_or(1).min(20);
+            }
+            _ => return,
+        }
+        let saved = self.persist_setting(row, value);
+        self.status = Some(match (saved, warnings.first()) {
+            (Ok(()), None) => format!("{row}: {value}"),
+            (Ok(()), Some(w)) => format!("{row}: {value} — {w}"),
+            (Err(e), _) => format!("{row}: {value} (not saved: {e})"),
+        });
+    }
+
+    /// Write one setting back to `config_dir/config`; `Err` carries the
+    /// reason for the status line.
+    fn persist_setting(&self, key: &str, value: &str) -> Result<(), String> {
+        match &self.config_dir {
+            Some(dir) => crate::config::save_key_to(&dir.join("config"), key, value)
+                .map_err(|e| e.to_string()),
+            None => Err("no config dir".to_string()),
+        }
+    }
+```
+
+Run: `cargo test app::tests:: 2>&1 | tail -5` — expected: all pass, including Task 3's four settings tests unchanged.
+
+- [ ] **Step 8: README**
+
+- Config table: after the `tree_refresh_seconds` row add
+  `| `side_padding` | 1 | 0–20 | columns of empty space between the terminal edges and the panes (padding outside the borders; `side_margin_percent` is the text margin inside the editor) |`
+- Sample block: add `side_padding = 1` after `autosave_seconds = 10`.
+- Keys table `s` row: change "cycle the theme (applies live and is written to the config file)" to "cycle the selected setting — theme, side padding (applies live and is written to the config file); j/k pick the row".
+- Configuration intro sentence from Task 4: change "The `theme` key can also be changed from inside mrkdup" to "`theme` and `side_padding` can also be changed from inside mrkdup".
+
+- [ ] **Step 9: Full suite, clippy, fmt, grep gate**
+
+Run: `cargo test 2>&1 | tail -3 && cargo clippy --all-targets -- -D warnings 2>&1 | tail -1 && cargo fmt && rg 'Color::' src --glob '!src/theme.rs' --glob '!src/theme/**'; rg 'allow\(dead_code\)|rewrite_theme_line|save_theme_name_to' src`
+Expected: all pass; clippy clean; both greps print nothing.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add src/config.rs src/config/tests.rs src/ui.rs src/app.rs src/app/tests.rs src/render/tests.rs README.md
+git commit -m "feat: side_padding insets the panes from the terminal edges (config + settings row)"
+```
+
+---
+
 ## Execution order
 
 - [ ] Task 1 builtins + discovery
 - [ ] Task 2 config writer
 - [ ] Task 3 popup logic
 - [ ] Task 4 popup rendering + docs
+- [ ] Task 5 side_padding + second settings row

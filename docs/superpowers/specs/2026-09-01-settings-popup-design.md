@@ -274,6 +274,26 @@ README config table and Themes section list all five names.
 - TestBackend dump with the popup open contains `Settings`, `theme`,
   and the current name.
 
+## side_padding (added 2026-09-01, after the popup was approved)
+
+The user asked for left/right padding from the terminal sides and chose
+an mrkdup key over terminal-emulator padding.
+
+- `Config.side_padding: u16`, columns, `0..=20`, default `1`. Numeric
+  key like the others (clamped, "not a number" warns).
+- `ui::draw` insets `f.area()` by `side_padding` on each side before the
+  vertical layout, capped at a quarter of the width so tiny terminals
+  keep at least half. Everything — panes, status bar, popups — lives in
+  the inset rect; the strip outside stays the terminal background.
+- Second settings row: `side_padding ‹ 1 ›`, choices `0`..`20`. `h`/`l`
+  apply live and persist; `j`/`k` now have two rows to move between.
+- The config writer generalizes: `rewrite_key_line(text, key, value)`
+  and `save_key_to(path, key, value)` replace the theme-only names.
+  `apply_setting` becomes a per-row match; status strings are
+  `<row>: <value>` with the same `— <warning>` / `(not saved: <err>)`
+  suffixes as the theme row.
+- README: config table row, sample line, Keys wording.
+
 ## Not doing
 
 - No editing overlay slots from the UI.
