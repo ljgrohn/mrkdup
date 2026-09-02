@@ -38,7 +38,7 @@ fn enter_opens_file_and_focuses_editor() {
     let mut app = App::new(fixture("open"), Config::default()).unwrap();
     app.handle_key(key(KeyCode::Enter)); // a.md selected first
     assert!(matches!(app.focus, Focus::Editor));
-    assert_eq!(app.editor.lines(), ["hello", "world"]);
+    assert_eq!(app.editor().lines(), ["hello", "world"]);
 }
 
 #[test]
@@ -55,7 +55,7 @@ fn typing_marks_dirty_and_switching_files_autosaves() {
     let mut app = App::new(root.clone(), Config::default()).unwrap();
     app.handle_key(key(KeyCode::Enter)); // open a.md
     app.handle_key(key(KeyCode::Char('X')));
-    assert!(app.editor.dirty);
+    assert!(app.editor().dirty);
     app.handle_key(key(KeyCode::Esc));
     app.handle_key(key(KeyCode::Char('j'))); // b.md
     app.handle_key(key(KeyCode::Enter)); // open b.md -> autosaves a.md
@@ -63,7 +63,7 @@ fn typing_marks_dirty_and_switching_files_autosaves() {
         fs::read_to_string(root.join("a.md")).unwrap(),
         "Xhello\nworld\n"
     );
-    assert_eq!(app.editor.lines(), ["bee"]);
+    assert_eq!(app.editor().lines(), ["bee"]);
 }
 
 #[test]
@@ -71,11 +71,11 @@ fn ctrl_z_undoes_and_ctrl_y_redoes() {
     let mut app = App::new(fixture("undo"), Config::default()).unwrap();
     app.handle_key(key(KeyCode::Enter));
     app.handle_key(key(KeyCode::Char('X')));
-    assert_eq!(app.editor.lines()[0], "Xhello");
+    assert_eq!(app.editor().lines()[0], "Xhello");
     app.handle_key(ctrl('z'));
-    assert_eq!(app.editor.lines()[0], "hello");
+    assert_eq!(app.editor().lines()[0], "hello");
     app.handle_key(ctrl('y'));
-    assert_eq!(app.editor.lines()[0], "Xhello");
+    assert_eq!(app.editor().lines()[0], "Xhello");
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn search_jumps_to_match() {
         app.handle_key(key(KeyCode::Char(c)));
     }
     app.handle_key(key(KeyCode::Enter));
-    assert_eq!(app.editor.cursor(), (1, 0));
+    assert_eq!(app.editor().cursor(), (1, 0));
 }
 
 #[test]
@@ -158,10 +158,10 @@ fn empty_search_repeats_last_search() {
     app.handle_key(ctrl('f'));
     app.handle_key(key(KeyCode::Char('l')));
     app.handle_key(key(KeyCode::Enter));
-    assert_eq!(app.editor.cursor(), (0, 2));
+    assert_eq!(app.editor().cursor(), (0, 2));
     app.handle_key(ctrl('f'));
     app.handle_key(key(KeyCode::Enter)); // empty -> repeat "l"
-    assert_eq!(app.editor.cursor(), (0, 3));
+    assert_eq!(app.editor().cursor(), (0, 3));
 }
 
 #[test]
@@ -171,11 +171,11 @@ fn ctrl_g_jumps_to_the_next_match_of_the_last_search() {
     app.handle_key(ctrl('f'));
     app.handle_key(key(KeyCode::Char('l')));
     app.handle_key(key(KeyCode::Enter));
-    assert_eq!(app.editor.cursor(), (0, 2));
+    assert_eq!(app.editor().cursor(), (0, 2));
     app.handle_key(ctrl('g'));
-    assert_eq!(app.editor.cursor(), (0, 3));
+    assert_eq!(app.editor().cursor(), (0, 3));
     app.handle_key(ctrl('g'));
-    assert_eq!(app.editor.cursor(), (1, 3)); // "world"
+    assert_eq!(app.editor().cursor(), (1, 3)); // "world"
 }
 
 #[test]
@@ -183,7 +183,7 @@ fn ctrl_g_without_a_previous_search_shows_a_status_message() {
     let mut app = App::new(fixture("next-none"), Config::default()).unwrap();
     app.handle_key(key(KeyCode::Enter));
     app.handle_key(ctrl('g'));
-    assert_eq!(app.editor.cursor(), (0, 0)); // didn't move
+    assert_eq!(app.editor().cursor(), (0, 0)); // didn't move
     assert!(app.status.as_deref().is_some_and(|s| s.contains("search")));
 }
 
@@ -196,7 +196,7 @@ fn search_submit_arms_the_renderer_highlight() {
         app.handle_key(key(KeyCode::Char(c)));
     }
     app.handle_key(key(KeyCode::Enter));
-    assert_eq!(app.search_highlight.as_deref(), Some("wor"));
+    assert_eq!(app.tab().unwrap().search_highlight.as_deref(), Some("wor"));
 }
 
 #[test]
@@ -206,11 +206,11 @@ fn opening_a_file_clears_the_search_highlight() {
     app.handle_key(ctrl('f'));
     app.handle_key(key(KeyCode::Char('l')));
     app.handle_key(key(KeyCode::Enter));
-    assert!(app.search_highlight.is_some());
+    assert!(app.tab().unwrap().search_highlight.is_some());
     app.handle_key(key(KeyCode::Esc));
     app.handle_key(key(KeyCode::Char('j'))); // b.md
     app.handle_key(key(KeyCode::Enter));
-    assert!(app.search_highlight.is_none());
+    assert!(app.tab().unwrap().search_highlight.is_none());
 }
 
 #[test]
@@ -224,7 +224,7 @@ fn search_query_with_regex_metachars_matches_literally() {
         app.handle_key(key(KeyCode::Char(c)));
     }
     app.handle_key(key(KeyCode::Enter));
-    assert_eq!(app.editor.cursor(), (0, 6));
+    assert_eq!(app.editor().cursor(), (0, 6));
     // and the renderer's matcher is literal too: "axb" is no match
     assert_eq!(find_ci("price axb here", "(a.b)", 0), None);
 }
@@ -250,7 +250,7 @@ fn shift_jk_types_capital_letters() {
     app.handle_key(key(KeyCode::Enter)); // hello / world, cursor (0,0)
     app.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT));
     app.handle_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT));
-    assert_eq!(app.editor.lines()[0], "JKhello"); // typed, not moved
+    assert_eq!(app.editor().lines()[0], "JKhello"); // typed, not moved
 }
 
 #[test]
@@ -260,10 +260,10 @@ fn alt_jk_jumps_by_paragraph() {
     let mut app = App::new(root, Config::default()).unwrap();
     app.handle_key(key(KeyCode::Enter));
     app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::ALT));
-    let (row, _) = app.editor.cursor();
+    let (row, _) = app.editor().cursor();
     assert!(row >= 1); // moved past the blank line
     app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::ALT));
-    assert_eq!(app.editor.cursor(), (0, 0));
+    assert_eq!(app.editor().cursor(), (0, 0));
 }
 
 #[test]
@@ -271,9 +271,9 @@ fn super_jk_jumps_to_line_end_and_start() {
     let mut app = App::new(fixture("linejump"), Config::default()).unwrap();
     app.handle_key(key(KeyCode::Enter)); // hello
     app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::SUPER));
-    assert_eq!(app.editor.cursor(), (0, 5)); // end of "hello"
+    assert_eq!(app.editor().cursor(), (0, 5)); // end of "hello"
     app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::SUPER));
-    assert_eq!(app.editor.cursor(), (0, 0));
+    assert_eq!(app.editor().cursor(), (0, 0));
 }
 
 #[test]
@@ -283,9 +283,9 @@ fn dash_dash_zero_expands_to_checkbox() {
     app.handle_key(key(KeyCode::Char('-')));
     app.handle_key(key(KeyCode::Char('-')));
     app.handle_key(key(KeyCode::Char('0')));
-    assert_eq!(app.editor.lines()[0], "- [ ] hello");
-    assert_eq!(app.editor.cursor(), (0, 6)); // ready to type the item
-    assert!(app.editor.dirty);
+    assert_eq!(app.editor().lines()[0], "- [ ] hello");
+    assert_eq!(app.editor().cursor(), (0, 6)); // ready to type the item
+    assert!(app.editor().dirty);
 }
 
 #[test]
@@ -293,7 +293,7 @@ fn plain_zero_still_types_zero() {
     let mut app = App::new(fixture("zero"), Config::default()).unwrap();
     app.handle_key(key(KeyCode::Enter));
     app.handle_key(key(KeyCode::Char('0')));
-    assert_eq!(app.editor.lines()[0], "0hello");
+    assert_eq!(app.editor().lines()[0], "0hello");
 }
 
 #[test]
@@ -303,7 +303,7 @@ fn triple_dash_zero_does_not_expand() {
     for c in "---0".chars() {
         app.handle_key(key(KeyCode::Char(c)));
     }
-    assert_eq!(app.editor.lines()[0], "---0hello");
+    assert_eq!(app.editor().lines()[0], "---0hello");
 }
 
 #[test]
@@ -324,7 +324,7 @@ fn plain_p_and_q_still_type_in_editor() {
     app.handle_key(key(KeyCode::Enter)); // open a.md ("hello"...)
     app.handle_key(key(KeyCode::Char('q')));
     app.handle_key(key(KeyCode::Char('p')));
-    assert_eq!(app.editor.lines()[0], "qphello");
+    assert_eq!(app.editor().lines()[0], "qphello");
     assert!(!app.should_quit);
 }
 
@@ -341,10 +341,10 @@ fn search_is_case_insensitive_both_ways() {
         app.handle_key(key(KeyCode::Char(c)));
     }
     app.handle_key(key(KeyCode::Enter));
-    assert_eq!(app.editor.cursor(), (1, 7));
+    assert_eq!(app.editor().cursor(), (1, 7));
     // ...and Ctrl+G wraps around to the capitalized one
     app.handle_key(ctrl('g'));
-    assert_eq!(app.editor.cursor(), (0, 0));
+    assert_eq!(app.editor().cursor(), (0, 0));
 }
 
 #[test]
@@ -354,16 +354,16 @@ fn ctrl_jk_move_by_word_without_deleting() {
     let mut app = App::new(root, Config::default()).unwrap();
     app.handle_key(key(KeyCode::Enter));
     app.handle_key(ctrl('j'));
-    let (_, col1) = app.editor.cursor();
+    let (_, col1) = app.editor().cursor();
     assert!(col1 > 0); // advanced
     app.handle_key(ctrl('j'));
-    let (_, col2) = app.editor.cursor();
+    let (_, col2) = app.editor().cursor();
     assert!(col2 > col1);
     app.handle_key(ctrl('k'));
-    assert_eq!(app.editor.cursor(), (0, col1));
+    assert_eq!(app.editor().cursor(), (0, col1));
     // nothing was deleted (Ctrl+K used to be kill-to-end-of-line)
-    assert_eq!(app.editor.lines()[0], "alpha bravo charlie");
-    assert!(!app.editor.dirty);
+    assert_eq!(app.editor().lines()[0], "alpha bravo charlie");
+    assert!(!app.editor().dirty);
 }
 
 #[test]
@@ -373,9 +373,9 @@ fn ctrl_d_checks_an_unchecked_checkbox() {
     let mut app = App::new(root, Config::default()).unwrap();
     app.handle_key(key(KeyCode::Enter));
     app.handle_key(ctrl('d'));
-    assert_eq!(app.editor.lines()[0], "- [x] milk");
-    assert_eq!(app.editor.cursor(), (0, 0)); // same width: cursor stays
-    assert!(app.editor.dirty);
+    assert_eq!(app.editor().lines()[0], "- [x] milk");
+    assert_eq!(app.editor().cursor(), (0, 0)); // same width: cursor stays
+    assert!(app.editor().dirty);
 }
 
 #[test]
@@ -385,7 +385,7 @@ fn ctrl_d_unchecks_a_checked_checkbox() {
     let mut app = App::new(root, Config::default()).unwrap();
     app.handle_key(key(KeyCode::Enter));
     app.handle_key(ctrl('d'));
-    assert_eq!(app.editor.lines()[0], "- [ ] milk");
+    assert_eq!(app.editor().lines()[0], "- [ ] milk");
 }
 
 #[test]
@@ -395,7 +395,7 @@ fn ctrl_d_unchecks_uppercase_checked_checkbox() {
     let mut app = App::new(root, Config::default()).unwrap();
     app.handle_key(key(KeyCode::Enter));
     app.handle_key(ctrl('d'));
-    assert_eq!(app.editor.lines()[0], "- [ ] milk");
+    assert_eq!(app.editor().lines()[0], "- [ ] milk");
 }
 
 #[test]
@@ -408,7 +408,7 @@ fn ctrl_d_with_active_selection_only_touches_cursor_line() {
     app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT));
     app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT));
     app.handle_key(ctrl('d'));
-    assert_eq!(app.editor.lines(), ["alpha", "bravo", "- [ ] charlie"]);
+    assert_eq!(app.editor().lines(), ["alpha", "bravo", "- [ ] charlie"]);
 }
 
 #[test]
@@ -417,8 +417,7 @@ fn typing_with_no_file_open_is_ignored() {
     let mut app = App::new(root, Config::default()).unwrap();
     app.handle_key(ctrl('b')); // hide tree -> editor focus, no file
     app.handle_key(key(KeyCode::Char('x')));
-    assert_eq!(app.editor.lines(), [""]); // nothing typed
-    assert!(!app.editor.dirty);
+    assert!(app.tabs.is_empty()); // nothing typed into a phantom buffer
     assert!(app.status.is_some()); // told the user why
     app.handle_key(key(KeyCode::Esc));
     assert!(matches!(app.focus, Focus::Tree)); // Esc still escapes
@@ -431,7 +430,7 @@ fn ctrl_d_turns_a_bullet_into_a_checkbox() {
     let mut app = App::new(root, Config::default()).unwrap();
     app.handle_key(key(KeyCode::Enter));
     app.handle_key(ctrl('d'));
-    assert_eq!(app.editor.lines()[0], "- [ ] milk");
+    assert_eq!(app.editor().lines()[0], "- [ ] milk");
 }
 
 #[test]
@@ -440,8 +439,8 @@ fn ctrl_d_prefixes_a_plain_line_and_shifts_the_cursor() {
     let mut app = App::new(root, Config::default()).unwrap();
     app.handle_key(key(KeyCode::Enter)); // "hello", cursor (0,0)
     app.handle_key(ctrl('d'));
-    assert_eq!(app.editor.lines()[0], "- [ ] hello");
-    assert_eq!(app.editor.cursor(), (0, 6)); // still on the 'h'
+    assert_eq!(app.editor().lines()[0], "- [ ] hello");
+    assert_eq!(app.editor().cursor(), (0, 6)); // still on the 'h'
 }
 
 #[test]
@@ -451,10 +450,10 @@ fn ctrl_d_preserves_indentation() {
     let mut app = App::new(root, Config::default()).unwrap();
     app.handle_key(key(KeyCode::Enter));
     app.handle_key(ctrl('d'));
-    assert_eq!(app.editor.lines()[0], "  - [x] a");
+    assert_eq!(app.editor().lines()[0], "  - [x] a");
     app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     app.handle_key(ctrl('d'));
-    assert_eq!(app.editor.lines()[1], "    - [ ] plain");
+    assert_eq!(app.editor().lines()[1], "    - [ ] plain");
 }
 
 #[test]
@@ -464,7 +463,7 @@ fn ctrl_d_on_an_empty_line_does_not_join_the_next_line() {
     let mut app = App::new(root, Config::default()).unwrap();
     app.handle_key(key(KeyCode::Enter));
     app.handle_key(ctrl('d'));
-    assert_eq!(app.editor.lines(), ["- [ ] ", "world"]);
+    assert_eq!(app.editor().lines(), ["- [ ] ", "world"]);
 }
 
 #[test]
@@ -473,11 +472,11 @@ fn ctrl_d_is_undoable() {
     let mut app = App::new(root, Config::default()).unwrap();
     app.handle_key(key(KeyCode::Enter)); // "hello"
     app.handle_key(ctrl('d'));
-    assert_eq!(app.editor.lines()[0], "- [ ] hello");
+    assert_eq!(app.editor().lines()[0], "- [ ] hello");
     // the toggle is a delete + an insert, so two undo steps
     app.handle_key(ctrl('z'));
     app.handle_key(ctrl('z'));
-    assert_eq!(app.editor.lines()[0], "hello");
+    assert_eq!(app.editor().lines()[0], "hello");
 }
 
 #[test]
@@ -486,8 +485,8 @@ fn shift_tab_in_editor_returns_to_tree_without_typing() {
     app.handle_key(key(KeyCode::Enter)); // open a.md
     app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
     assert!(matches!(app.focus, Focus::Tree));
-    assert_eq!(app.editor.lines(), ["hello", "world"]); // unchanged
-    assert!(!app.editor.dirty);
+    assert_eq!(app.editor().lines(), ["hello", "world"]); // unchanged
+    assert!(!app.editor().dirty);
 }
 
 #[test]
@@ -554,8 +553,7 @@ fn deleting_the_open_file_clears_the_editor() {
     app.handle_key(key(KeyCode::Char('x')));
     app.handle_key(key(KeyCode::Char('k'))); // k also toggles to Yes
     app.handle_key(key(KeyCode::Enter));
-    assert!(app.editor.path.is_none());
-    assert_eq!(app.editor.lines(), [""]);
+    assert!(app.tabs.is_empty());
 }
 
 #[test]
@@ -607,7 +605,7 @@ fn moving_the_open_file_keeps_editing_it_at_the_new_path() {
     app.handle_key(key(KeyCode::Char('j'))); // docs
     app.handle_key(key(KeyCode::Enter));
     assert_eq!(
-        app.editor.path.as_deref(),
+        app.editor().path.as_deref(),
         Some(root.canonicalize().unwrap().join("docs/a.md").as_path())
     );
     // edits still save to the new location
@@ -743,7 +741,7 @@ fn renaming_the_open_file_keeps_editing_it_at_the_new_path() {
     app.handle_key(key(KeyCode::Esc));
     rename_to(&mut app, 4, "z.md");
     assert_eq!(
-        app.editor.path.as_deref(),
+        app.editor().path.as_deref(),
         Some(root.canonicalize().unwrap().join("z.md").as_path())
     );
     // edits still save to the new name
@@ -795,7 +793,7 @@ fn ctrl_p_typing_filters_and_enter_opens_the_top_match() {
     assert!(matches!(app.prompt, Prompt::None));
     assert!(matches!(app.focus, Focus::Editor));
     assert_eq!(
-        app.editor.path.as_deref(),
+        app.editor().path.as_deref(),
         Some(root.canonicalize().unwrap().join("b.md").as_path())
     );
 }
@@ -817,7 +815,7 @@ fn ctrl_p_selection_moves_with_arrows_and_ctrl_jk() {
     app.handle_key(ctrl('j'));
     app.handle_key(key(KeyCode::Enter)); // second result = b.md
     assert!(app
-        .editor
+        .editor()
         .path
         .as_deref()
         .is_some_and(|p| p.ends_with("b.md")));
@@ -836,7 +834,7 @@ fn ctrl_p_from_the_editor_autosaves_before_opening() {
         fs::read_to_string(root.join("a.md")).unwrap(),
         "Xhello\nworld\n"
     );
-    assert_eq!(app.editor.lines(), ["bee"]);
+    assert_eq!(app.editor().lines(), ["bee"]);
 }
 
 #[test]
@@ -908,7 +906,7 @@ fn question_mark_in_the_editor_types_a_character() {
     app.handle_key(key(KeyCode::Enter)); // open a.md, focus editor
     app.handle_key(key(KeyCode::Char('?')));
     assert!(matches!(app.prompt, Prompt::None));
-    assert_eq!(app.editor.lines()[0], "?hello");
+    assert_eq!(app.editor().lines()[0], "?hello");
 }
 
 #[test]
@@ -917,7 +915,7 @@ fn esc_closes_go_to_file_without_opening() {
     app.handle_key(ctrl('p'));
     app.handle_key(key(KeyCode::Esc));
     assert!(matches!(app.prompt, Prompt::None));
-    assert!(app.editor.path.is_none());
+    assert!(app.tabs.is_empty());
 }
 
 #[test]
@@ -937,7 +935,7 @@ fn enter_with_no_go_to_file_match_just_closes() {
     }
     app.handle_key(key(KeyCode::Enter));
     assert!(matches!(app.prompt, Prompt::None));
-    assert!(app.editor.path.is_none());
+    assert!(app.tabs.is_empty());
 }
 
 #[test]
@@ -947,9 +945,10 @@ fn tick_honors_the_configured_autosave_delay() {
     let mut app = App::new(root, cfg).unwrap();
     app.handle_key(key(KeyCode::Enter));
     app.handle_key(key(KeyCode::Char('Y')));
-    app.last_edit = Some(std::time::Instant::now() - std::time::Duration::from_secs(5));
+    app.tab_mut().unwrap().last_edit =
+        Some(std::time::Instant::now() - std::time::Duration::from_secs(5));
     app.tick();
-    assert!(app.editor.dirty); // 5s idle < the configured 300s
+    assert!(app.editor().dirty); // 5s idle < the configured 300s
 }
 
 #[test]
@@ -970,9 +969,10 @@ fn tick_idle_autosaves() {
     let mut app = App::new(root.clone(), Config::default()).unwrap();
     app.handle_key(key(KeyCode::Enter));
     app.handle_key(key(KeyCode::Char('Y')));
-    app.last_edit = Some(std::time::Instant::now() - std::time::Duration::from_secs(3));
+    app.tab_mut().unwrap().last_edit =
+        Some(std::time::Instant::now() - std::time::Duration::from_secs(3));
     app.tick();
-    assert!(!app.editor.dirty);
+    assert!(!app.editor().dirty);
     assert_eq!(
         fs::read_to_string(root.join("a.md")).unwrap(),
         "Yhello\nworld\n"
@@ -1077,9 +1077,9 @@ fn settings_close_keys_and_editor_s_still_types() {
     app.handle_key(key(KeyCode::Char('s')));
     assert!(matches!(app.prompt, Prompt::None));
     assert!(
-        app.editor.lines()[0].starts_with('s'),
+        app.editor().lines()[0].starts_with('s'),
         "{:?}",
-        app.editor.lines()[0]
+        app.editor().lines()[0]
     );
 }
 
@@ -1200,9 +1200,9 @@ fn click_in_editor_lands_the_cursor() {
     app.handle_mouse(down(35, 2)); // "world", col 3
     app.handle_mouse(up(35, 2));
     assert!(matches!(app.focus, Focus::Editor));
-    assert_eq!(app.editor.cursor(), (1, 3));
+    assert_eq!(app.editor().cursor(), (1, 3));
     // a plain click leaves no selection behind
-    assert!(app.editor.selection_range().is_none());
+    assert!(app.editor().selection_range().is_none());
     assert!(app.clipboard.is_none());
 }
 
@@ -1211,7 +1211,7 @@ fn click_past_the_end_of_a_line_snaps_to_its_end() {
     let mut app = mouse_app("click-end");
     app.handle_mouse(down(70, 1));
     app.handle_mouse(up(70, 1));
-    assert_eq!(app.editor.cursor(), (0, 5));
+    assert_eq!(app.editor().cursor(), (0, 5));
 }
 
 #[test]
@@ -1219,10 +1219,10 @@ fn drag_selects_and_release_copies() {
     let mut app = mouse_app("drag");
     app.handle_mouse(down(33, 1)); // "hello" col 1
     app.handle_mouse(drag(34, 2)); // "world" col 2
-    assert_eq!(app.editor.selection_range(), Some(((0, 1), (1, 2))));
+    assert_eq!(app.editor().selection_range(), Some(((0, 1), (1, 2))));
     app.handle_mouse(up(34, 2));
     // the selection stays visible and its text is queued for the clipboard
-    assert_eq!(app.editor.selection_range(), Some(((0, 1), (1, 2))));
+    assert_eq!(app.editor().selection_range(), Some(((0, 1), (1, 2))));
     assert_eq!(app.clipboard.as_deref(), Some("ello\nwo"));
     assert_eq!(app.status.as_deref(), Some("copied to clipboard"));
 }
@@ -1235,7 +1235,7 @@ fn drag_into_the_tree_pane_keeps_selecting_editor_text() {
     app.handle_mouse(drag(5, 1));
     // x clamps to the editor's left edge, so the anchor..cursor range is
     // (0,0)..(1,4) — the tree is untouched
-    assert_eq!(app.editor.selection_range(), Some(((0, 0), (1, 4))));
+    assert_eq!(app.editor().selection_range(), Some(((0, 0), (1, 4))));
     assert_eq!(app.tree.selected(), 0);
     assert!(matches!(app.focus, Focus::Editor));
     app.handle_mouse(up(5, 1));
@@ -1251,26 +1251,26 @@ fn drag_above_the_pane_scrolls_one_row_per_event() {
     app.handle_key(key(KeyCode::Enter));
     app.tree_area = Some(Rect::new(1, 1, 28, 8));
     app.editor_area = Some(Rect::new(32, 1, 40, 8));
-    app.editor_scroll = 10; // rows 10..18 visible
+    app.tab_mut().unwrap().scroll = 10; // rows 10..18 visible
     app.handle_mouse(down(32, 4)); // line 13
     app.handle_mouse(drag(32, 0)); // above the pane → row 9
-    assert_eq!(app.editor.cursor(), (9, 0));
-    app.editor_scroll = 9;
+    assert_eq!(app.editor().cursor(), (9, 0));
+    app.tab_mut().unwrap().scroll = 9;
     app.handle_mouse(drag(32, 0));
-    assert_eq!(app.editor.cursor(), (8, 0));
+    assert_eq!(app.editor().cursor(), (8, 0));
     // and below it → the row just under the window
     app.handle_mouse(drag(32, 20));
-    assert_eq!(app.editor.cursor(), (17, 0));
+    assert_eq!(app.editor().cursor(), (17, 0));
 }
 
 #[test]
 fn click_in_the_tree_selects_and_opens_that_row() {
     let mut app = mouse_app("tree-click");
-    assert_eq!(app.editor.lines(), ["hello", "world"]);
+    assert_eq!(app.editor().lines(), ["hello", "world"]);
     app.handle_mouse(down(3, 2)); // second row: b.md
     app.handle_mouse(up(3, 2));
     assert_eq!(app.tree.selected(), 1);
-    assert_eq!(app.editor.lines(), ["bee"]);
+    assert_eq!(app.editor().lines(), ["bee"]);
     assert!(matches!(app.focus, Focus::Editor));
 }
 
@@ -1280,7 +1280,7 @@ fn click_on_empty_tree_space_only_focuses_the_tree() {
     app.handle_mouse(down(3, 7)); // below the two rows
     assert!(matches!(app.focus, Focus::Tree));
     assert_eq!(app.tree.selected(), 0);
-    assert_eq!(app.editor.lines(), ["hello", "world"]);
+    assert_eq!(app.editor().lines(), ["hello", "world"]);
 }
 
 #[test]
@@ -1293,13 +1293,13 @@ fn wheel_moves_the_editor_cursor_three_lines() {
     app.tree_area = Some(Rect::new(1, 1, 28, 8));
     app.editor_area = Some(Rect::new(32, 1, 40, 8));
     app.handle_mouse(mouse(MouseEventKind::ScrollDown, 40, 3));
-    assert_eq!(app.editor.cursor(), (3, 0));
+    assert_eq!(app.editor().cursor(), (3, 0));
     app.handle_mouse(mouse(MouseEventKind::ScrollUp, 40, 3));
-    assert_eq!(app.editor.cursor(), (0, 0));
+    assert_eq!(app.editor().cursor(), (0, 0));
     // over the tree the wheel moves the tree selection instead
     app.handle_mouse(mouse(MouseEventKind::ScrollDown, 5, 3));
     assert_eq!(app.tree.selected(), 1); // clamped: only two rows
-    assert_eq!(app.editor.cursor(), (0, 0));
+    assert_eq!(app.editor().cursor(), (0, 0));
 }
 
 #[test]
@@ -1309,7 +1309,7 @@ fn mouse_is_ignored_while_a_prompt_is_open() {
     app.handle_mouse(down(35, 2));
     app.handle_mouse(up(35, 2));
     assert!(matches!(app.prompt, Prompt::Search(_)));
-    assert_eq!(app.editor.cursor(), (0, 0));
+    assert_eq!(app.editor().cursor(), (0, 0));
 }
 
 #[test]
@@ -1319,8 +1319,8 @@ fn mouse_does_nothing_without_recorded_pane_rects() {
     app.handle_mouse(down(35, 2));
     app.handle_mouse(drag(36, 2));
     app.handle_mouse(up(36, 2));
-    assert_eq!(app.editor.cursor(), (0, 0));
-    assert!(app.editor.selection_range().is_none());
+    assert_eq!(app.editor().cursor(), (0, 0));
+    assert!(app.editor().selection_range().is_none());
 }
 
 // ---- search highlight / Ctrl+W --------------------------------------
@@ -1334,16 +1334,16 @@ fn typing_clears_the_search_highlight() {
         app.handle_key(key(KeyCode::Char(c)));
     }
     app.handle_key(key(KeyCode::Enter));
-    assert_eq!(app.search_highlight.as_deref(), Some("wor"));
+    assert_eq!(app.tab().unwrap().search_highlight.as_deref(), Some("wor"));
     // cursor motion keeps it
     app.handle_key(key(KeyCode::Left));
-    assert_eq!(app.search_highlight.as_deref(), Some("wor"));
+    assert_eq!(app.tab().unwrap().search_highlight.as_deref(), Some("wor"));
     // an edit drops it
     app.handle_key(key(KeyCode::Char('x')));
-    assert!(app.search_highlight.is_none());
+    assert!(app.tab().unwrap().search_highlight.is_none());
     // Ctrl+G brings it back for the next match
     app.handle_key(ctrl('g'));
-    assert_eq!(app.search_highlight.as_deref(), Some("wor"));
+    assert_eq!(app.tab().unwrap().search_highlight.as_deref(), Some("wor"));
 }
 
 #[test]
@@ -1353,18 +1353,16 @@ fn ctrl_w_saves_and_closes_the_file() {
     app.handle_key(key(KeyCode::Enter));
     app.handle_key(key(KeyCode::Char('X')));
     app.handle_key(ctrl('w'));
-    assert!(app.editor.path.is_none());
-    assert_eq!(app.editor.lines(), [""]);
-    assert!(!app.editor.dirty);
+    assert!(app.tabs.is_empty());
     assert!(matches!(app.focus, Focus::Tree));
-    assert_eq!(app.status.as_deref(), Some("closed"));
+    assert_eq!(app.status.as_deref(), Some("closed a.md"));
     assert_eq!(
         fs::read_to_string(root.join("a.md")).unwrap(),
         "Xhello\nworld\n"
     );
     // typing now hits the no-file guard rather than a phantom buffer
     app.handle_key(key(KeyCode::Tab)); // reopen via the tree
-    assert_eq!(app.editor.lines(), ["Xhello", "world"]);
+    assert_eq!(app.editor().lines(), ["Xhello", "world"]);
 }
 
 #[test]
@@ -1382,8 +1380,8 @@ fn ctrl_w_with_a_disk_conflict_keeps_the_file_open() {
         .set_modified(future)
         .unwrap();
     app.handle_key(ctrl('w'));
-    assert!(app.editor.path.is_some());
-    assert!(app.editor.dirty);
+    assert!(!app.tabs.is_empty());
+    assert!(app.editor().dirty);
     assert!(matches!(app.focus, Focus::Editor));
     assert!(app.status.as_deref().unwrap().contains("conflict"));
     assert_eq!(fs::read_to_string(root.join("a.md")).unwrap(), "other\n");
@@ -1395,4 +1393,227 @@ fn ctrl_w_with_no_file_open_is_a_noop() {
     app.handle_key(ctrl('w'));
     assert!(app.status.is_none());
     assert!(matches!(app.focus, Focus::Tree));
+}
+
+// ---- tabs -----------------------------------------------------------
+
+fn alt(c: char) -> KeyEvent {
+    KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT)
+}
+
+/// a.md and b.md open, in that order, b.md active.
+fn two_tabs(tag: &str) -> App {
+    let mut app = App::new(fixture(tag), Config::default()).unwrap();
+    app.handle_key(key(KeyCode::Enter)); // a.md
+    app.handle_key(key(KeyCode::Esc));
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Enter)); // b.md
+    app
+}
+
+#[test]
+fn opening_a_second_file_adds_a_tab_and_keeps_the_first() {
+    let app = two_tabs("tabs-open");
+    assert_eq!(app.tab_titles(), ["a.md", "b.md"]);
+    assert_eq!(app.active, 1);
+    assert_eq!(app.editor().lines(), ["bee"]);
+    assert_eq!(app.tabs[0].editor.lines(), ["hello", "world"]);
+}
+
+#[test]
+fn reopening_an_open_file_switches_to_its_tab() {
+    let mut app = two_tabs("tabs-reopen");
+    app.handle_key(key(KeyCode::Esc));
+    app.handle_key(key(KeyCode::Char('k')));
+    app.handle_key(key(KeyCode::Enter)); // a.md again
+    assert_eq!(app.tab_titles(), ["a.md", "b.md"]);
+    assert_eq!(app.active, 0);
+    assert!(matches!(app.focus, Focus::Editor));
+}
+
+#[test]
+fn switching_tabs_autosaves_the_one_being_left() {
+    let root = fixture("tabs-autosave");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    app.handle_key(key(KeyCode::Enter)); // a.md
+    app.handle_key(key(KeyCode::Char('X')));
+    app.handle_key(key(KeyCode::Esc));
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Enter)); // b.md
+    assert_eq!(
+        fs::read_to_string(root.join("a.md")).unwrap(),
+        "Xhello\nworld\n"
+    );
+    assert!(!app.tabs[0].editor.dirty);
+}
+
+#[test]
+fn new_tab_opens_right_of_the_active_one() {
+    let mut app = two_tabs("tabs-insert");
+    fs::write(app.tree.root().join("c.md"), "sea\n").unwrap();
+    app.handle_key(alt('h')); // back to a.md
+    assert_eq!(app.active, 0);
+    app.handle_key(key(KeyCode::Esc));
+    app.handle_key(key(KeyCode::Char('u'))); // pick up c.md
+    app.handle_key(key(KeyCode::Char('G')));
+    app.handle_key(key(KeyCode::Enter)); // c.md
+    assert_eq!(app.tab_titles(), ["a.md", "c.md", "b.md"]);
+    assert_eq!(app.active, 1);
+}
+
+#[test]
+fn opt_h_and_l_cycle_tabs_and_wrap() {
+    let mut app = two_tabs("tabs-cycle");
+    app.handle_key(alt('l'));
+    assert_eq!(app.active, 0); // wrapped
+    app.handle_key(alt('l'));
+    assert_eq!(app.active, 1);
+    app.handle_key(alt('h'));
+    assert_eq!(app.active, 0);
+    // from the tree too
+    app.handle_key(key(KeyCode::Esc));
+    app.handle_key(alt('l'));
+    assert_eq!(app.active, 1);
+    assert!(matches!(app.focus, Focus::Editor));
+}
+
+#[test]
+fn opt_digit_jumps_to_that_tab() {
+    let mut app = two_tabs("tabs-digit");
+    app.handle_key(alt('1'));
+    assert_eq!(app.active, 0);
+    app.handle_key(alt('2'));
+    assert_eq!(app.active, 1);
+    app.handle_key(alt('5')); // no such tab
+    assert_eq!(app.active, 1);
+}
+
+#[test]
+fn plain_h_and_l_still_type_in_the_editor() {
+    let mut app = two_tabs("tabs-plain");
+    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('l')));
+    assert_eq!(app.editor().lines(), ["hlbee"]);
+    assert_eq!(app.active, 1);
+}
+
+#[test]
+fn ctrl_w_closes_the_active_tab_and_activates_the_left_neighbour() {
+    let mut app = two_tabs("tabs-close");
+    app.handle_key(ctrl('w'));
+    assert_eq!(app.tab_titles(), ["a.md"]);
+    assert_eq!(app.active, 0);
+    assert!(matches!(app.focus, Focus::Editor));
+    assert_eq!(app.status.as_deref(), Some("closed b.md"));
+    app.handle_key(ctrl('w'));
+    assert!(app.tabs.is_empty());
+    assert!(matches!(app.focus, Focus::Tree));
+}
+
+#[test]
+fn closing_the_first_tab_activates_the_new_first() {
+    let mut app = two_tabs("tabs-close-first");
+    app.handle_key(alt('1'));
+    app.handle_key(ctrl('w'));
+    assert_eq!(app.tab_titles(), ["b.md"]);
+    assert_eq!(app.active, 0);
+}
+
+#[test]
+fn clicking_a_tab_title_switches_and_the_cross_closes() {
+    let mut app = two_tabs("tabs-click");
+    // bar at x 31.., " a.md ×  b.md × ": a.md title 0..6, × 6..8, b.md 8..14, × 14..16
+    let segs = crate::tab::layout_bar(&app.tab_titles(), app.active, 28);
+    app.tab_bar = Some((Rect::new(31, 1, 28, 1), segs));
+    app.editor_area = Some(Rect::new(31, 2, 28, 8));
+    app.handle_mouse(down(33, 1));
+    app.handle_mouse(up(33, 1));
+    assert_eq!(app.active, 0);
+    app.handle_mouse(down(31 + 14, 1)); // b.md's ×
+    app.handle_mouse(up(31 + 14, 1));
+    assert_eq!(app.tab_titles(), ["a.md"]);
+    assert_eq!(app.active, 0);
+    // a click on the bar never reaches the editor text below it
+    assert!(app.editor().selection_range().is_none());
+}
+
+#[test]
+fn deleting_a_file_open_in_another_tab_drops_that_tab() {
+    let mut app = two_tabs("tabs-delete");
+    // tree selection is on b.md; move to a.md and delete it
+    app.handle_key(key(KeyCode::Esc));
+    app.handle_key(key(KeyCode::Char('k')));
+    app.handle_key(key(KeyCode::Char('x')));
+    app.handle_key(key(KeyCode::Char('x')));
+    assert_eq!(app.tab_titles(), ["b.md"]);
+    assert_eq!(app.active, 0);
+    assert_eq!(app.editor().lines(), ["bee"]);
+}
+
+#[test]
+fn renaming_a_file_updates_its_tab_title() {
+    let mut app = two_tabs("tabs-rename");
+    app.handle_key(key(KeyCode::Esc));
+    app.handle_key(key(KeyCode::Char('k'))); // a.md in the tree
+    app.handle_key(key(KeyCode::Char('r')));
+    for _ in 0..4 {
+        app.handle_key(key(KeyCode::Backspace));
+    }
+    for c in "z.md".chars() {
+        app.handle_key(key(KeyCode::Char(c)));
+    }
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(app.tab_titles(), ["z.md", "b.md"]);
+}
+
+#[test]
+fn tick_autosaves_an_inactive_tab() {
+    let root = fixture("tabs-tick");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    app.handle_key(key(KeyCode::Enter)); // a.md
+    app.handle_key(key(KeyCode::Char('X')));
+    // switch without the autosave: fake a stale timer on the tab
+    app.tabs[0].editor.mark_dirty();
+    app.tabs[0].last_edit = Some(std::time::Instant::now() - std::time::Duration::from_secs(5));
+    // an unrelated second tab, active
+    app.handle_key(key(KeyCode::Esc));
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Enter));
+    // (the switch already saved a.md; dirty it again behind the scenes)
+    app.tabs[0].editor.insert_str("Y");
+    app.tabs[0].editor.mark_dirty();
+    app.tabs[0].last_edit = Some(std::time::Instant::now() - std::time::Duration::from_secs(5));
+    app.tick();
+    assert!(!app.tabs[0].editor.dirty);
+    assert_eq!(
+        fs::read_to_string(root.join("a.md")).unwrap(),
+        "XYhello\nworld\n"
+    );
+    assert_eq!(app.status.as_deref(), Some("saved a.md"));
+}
+
+#[test]
+fn quit_saves_every_tab() {
+    let root = fixture("tabs-quit");
+    let mut app = two_tabs("tabs-quit");
+    app.handle_key(key(KeyCode::Char('B'))); // b.md dirty
+    app.tabs[0].editor.insert_str("A");
+    app.tabs[0].editor.mark_dirty(); // a.md dirty behind the scenes
+    app.handle_key(ctrl('q'));
+    assert!(app.should_quit);
+    assert_eq!(
+        fs::read_to_string(root.join("a.md")).unwrap(),
+        "Ahello\nworld\n"
+    );
+    assert_eq!(fs::read_to_string(root.join("b.md")).unwrap(), "Bbee\n");
+}
+
+#[test]
+fn search_highlight_is_per_tab() {
+    let mut app = two_tabs("tabs-search");
+    app.handle_key(ctrl('f'));
+    app.handle_key(key(KeyCode::Char('e')));
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(app.tabs[1].search_highlight.as_deref(), Some("e"));
+    assert!(app.tabs[0].search_highlight.is_none());
 }

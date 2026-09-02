@@ -168,7 +168,8 @@ fn styling_stays_correct_across_a_soft_wrap_boundary() {
     // source without knowing the exact wrap width.
     let mut seen: Vec<(char, bool, bool)> = Vec::new(); // (char, bold, italic)
     let mut rows_seen = std::collections::HashSet::new();
-    for y in 0..15u16 {
+    // from row 2: row 1 is the tab bar, whose file name has a '.'
+    for y in 2..15u16 {
         for x in 30..80u16 {
             if let Some(cell) = buf.cell((x, y)) {
                 let sym = cell.symbol();
@@ -210,15 +211,15 @@ fn painting_twice_without_an_edit_reuses_the_layout_cache() {
     let mut app = App::new(root, Config::default()).unwrap();
     app.handle_key(key(KeyCode::Enter));
     draw_to_string(&mut app);
-    assert_eq!(app.editor.layout_recomputes(), 1);
+    assert_eq!(app.editor().layout_recomputes(), 1);
     // a second paint with nothing changed (no edit, no resize) must
     // not redo wrap+highlight
     draw_to_string(&mut app);
-    assert_eq!(app.editor.layout_recomputes(), 1);
+    assert_eq!(app.editor().layout_recomputes(), 1);
     // an actual edit does invalidate and recompute
     app.handle_key(key(KeyCode::Char('!')));
     draw_to_string(&mut app);
-    assert_eq!(app.editor.layout_recomputes(), 2);
+    assert_eq!(app.editor().layout_recomputes(), 2);
 }
 
 #[test]
@@ -234,7 +235,7 @@ fn cursor_tracks_into_scrolled_view() {
     assert!(matches!(app.focus, Focus::Editor));
     let text = draw_to_string(&mut app);
     assert!(text.contains("line 150"), "cursor line not visible: {text}");
-    assert!(app.editor_scroll > 0);
+    assert!(app.tab().unwrap().scroll > 0);
 }
 
 #[test]

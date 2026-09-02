@@ -1,5 +1,7 @@
 use super::*;
+use crate::editor::Editor;
 use std::fs;
+use std::path::PathBuf;
 
 /// A temp dir with an `a.md` in it, canonicalized so it matches
 /// what `Tree::new` (and thus `tree.root()`) returns.
@@ -42,22 +44,25 @@ fn rename_moves_the_file_and_redirects_the_open_editor() {
     let mut tree = Tree::new(root.clone()).unwrap();
     let mut editor = Editor::new();
     editor.path = Some(root.join("a.md"));
-    let status = rename(&mut tree, &mut editor, &root.join("a.md"), "z.md")
+    let mut tabs = vec![Tab::new(editor)];
+    let status = rename(&mut tree, &mut tabs, &root.join("a.md"), "z.md")
         .unwrap()
         .unwrap();
     assert_eq!(status, "renamed to z.md");
     assert!(root.join("z.md").exists());
     assert!(!root.join("a.md").exists());
-    assert_eq!(editor.path.as_deref(), Some(root.join("z.md").as_path()));
+    assert_eq!(
+        tabs[0].editor.path.as_deref(),
+        Some(root.join("z.md").as_path())
+    );
 }
 
 #[test]
 fn rename_to_same_name_is_a_no_op() {
     let root = fixture("rename-same");
     let mut tree = Tree::new(root.clone()).unwrap();
-    let mut editor = Editor::new();
     assert_eq!(
-        rename(&mut tree, &mut editor, &root.join("a.md"), "a.md").unwrap(),
+        rename(&mut tree, &mut [], &root.join("a.md"), "a.md").unwrap(),
         None
     );
     assert!(root.join("a.md").exists());
@@ -67,9 +72,8 @@ fn rename_to_same_name_is_a_no_op() {
 fn rename_rejects_invalid_names() {
     let root = fixture("rename-invalid");
     let mut tree = Tree::new(root.clone()).unwrap();
-    let mut editor = Editor::new();
     for name in ["docs/x.md", "..", ""] {
-        assert!(rename(&mut tree, &mut editor, &root.join("a.md"), name).is_err());
+        assert!(rename(&mut tree, &mut [], &root.join("a.md"), name).is_err());
     }
 }
 
@@ -80,18 +84,14 @@ fn move_to_relocates_the_file_and_redirects_the_open_editor() {
     let mut tree = Tree::new(root.clone()).unwrap();
     let mut editor = Editor::new();
     editor.path = Some(root.join("a.md"));
-    let status = move_to(
-        &mut tree,
-        &mut editor,
-        &root.join("a.md"),
-        &root.join("docs"),
-    )
-    .unwrap()
-    .unwrap();
+    let mut tabs = vec![Tab::new(editor)];
+    let status = move_to(&mut tree, &mut tabs, &root.join("a.md"), &root.join("docs"))
+        .unwrap()
+        .unwrap();
     assert_eq!(status, "moved to docs/a.md");
     assert!(root.join("docs/a.md").exists());
     assert_eq!(
-        editor.path.as_deref(),
+        tabs[0].editor.path.as_deref(),
         Some(root.join("docs/a.md").as_path())
     );
 }
@@ -100,30 +100,28 @@ fn move_to_relocates_the_file_and_redirects_the_open_editor() {
 fn move_to_same_directory_is_rejected() {
     let root = fixture("move-same");
     let mut tree = Tree::new(root.clone()).unwrap();
-    let mut editor = Editor::new();
-    assert!(move_to(&mut tree, &mut editor, &root.join("a.md"), &root).is_err());
+    assert!(move_to(&mut tree, &mut [], &root.join("a.md"), &root).is_err());
     assert!(root.join("a.md").exists());
 }
 
 #[test]
-fn delete_removes_the_file_and_resets_a_matching_editor() {
+fn delete_removes_the_file() {
     let root = fixture("delete");
     let mut tree = Tree::new(root.clone()).unwrap();
-    let mut editor = Editor::new();
-    editor.path = Some(root.join("a.md"));
-    let status = delete(&mut tree, &mut editor, &root.join("a.md")).unwrap();
+    let status = delete(&mut tree, &root.join("a.md")).unwrap();
     assert_eq!(status, "deleted a.md");
     assert!(!root.join("a.md").exists());
-    assert!(editor.path.is_none());
+    assert!(tree.rows().iter().all(|r| r.name != "a.md"));
 }
 
 #[test]
-fn delete_leaves_an_unrelated_open_editor_alone() {
-    let root = fixture("delete-unrelated");
-    fs::write(root.join("b.md"), "bee\n").unwrap();
-    let mut tree = Tree::new(root.clone()).unwrap();
-    let mut editor = Editor::new();
-    editor.path = Some(root.join("b.md"));
-    delete(&mut tree, &mut editor, &root.join("a.md")).unwrap();
-    assert_eq!(editor.path.as_deref(), Some(root.join("b.md").as_path()));
+fn redirect_only_touches_tabs_on_the_old_path() {
+    let mut a = Editor::new();
+    a.path = Some(PathBuf::from("/x/a.md"));
+    let mut b = Editor::new();
+    b.path = Some(PathBuf::from("/x/b.md"));
+    let mut tabs = vec![Tab::new(a), Tab::new(b)];
+    redirect(&mut tabs, Path::new("/x/a.md"), Path::new("/y/a.md"));
+    assert_eq!(tabs[0].editor.path.as_deref(), Some(Path::new("/y/a.md")));
+    assert_eq!(tabs[1].editor.path.as_deref(), Some(Path::new("/x/b.md")));
 }

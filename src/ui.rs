@@ -21,6 +21,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // a hidden pane (or a covered editor) must not keep last frame's rect
     app.editor_area = None;
     app.tree_area = None;
+    app.tab_bar = None;
 
     if app.tree_visible && app.editor_visible {
         let [tree_area, editor_area] = Layout::horizontal([
@@ -272,7 +273,8 @@ fn draw_tree(f: &mut Frame, app: &mut App, area: Rect) {
         app.tree_scroll = selected + 1 - height;
     }
 
-    let open_marker = open_marker_index(app.tree.rows(), app.editor.path.as_deref());
+    let open_path = app.tab().and_then(|t| t.editor.path.clone());
+    let open_marker = open_marker_index(app.tree.rows(), open_path.as_deref());
     let tree_open_style = app.theme.tree_open;
     let lines: Vec<Line> = app
         .tree
@@ -332,34 +334,74 @@ fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style(focused, &app.theme));
-    let inner = with_side_margins(
-        block.inner(area),
-        app.config.side_margin_percent,
-        app.config.top_margin_percent,
-    );
+    let block_inner = block.inner(area);
     f.render_widget(block, area);
-    if app.editor.path.is_none() {
+    if app.tabs.is_empty() {
+        let inner = with_side_margins(
+            block_inner,
+            app.config.side_margin_percent,
+            app.config.top_margin_percent,
+        );
         draw_welcome(f, inner, &app.theme);
         return;
     }
+    // the tab bar takes the top row of the pane, full width; the text
+    // margins apply to what's left
+    let (bar, body) = if block_inner.height >= 2 {
+        let [bar, body] =
+            Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(block_inner);
+        (Some(bar), body)
+    } else {
+        (None, block_inner)
+    };
+    if let Some(bar) = bar {
+        draw_tab_bar(f, app, bar);
+    }
+    let inner = with_side_margins(
+        body,
+        app.config.side_margin_percent,
+        app.config.top_margin_percent,
+    );
     app.editor_area = Some(inner);
     // our renderer: soft wrap + live syntax styling + terminal cursor
     // (only drawn when the editor has focus)
-    let cursor = app.editor.cursor();
-    let selection = app.editor.selection_range();
-    let file_kind = crate::highlight::file_kind(app.editor.path.as_deref());
-    let (lines, cache) = app.editor.render_parts();
+    let theme = &app.theme;
+    let tab = &mut app.tabs[app.active];
+    let cursor = tab.editor.cursor();
+    let selection = tab.editor.selection_range();
+    let file_kind = crate::highlight::file_kind(tab.editor.path.as_deref());
+    let (lines, cache) = tab.editor.render_parts();
     let view = crate::render::EditorView {
         lines,
         cursor,
         selection,
-        search: app.search_highlight.as_deref(),
+        search: tab.search_highlight.as_deref(),
         file_kind,
-        scroll: &mut app.editor_scroll,
+        scroll: &mut tab.scroll,
         cache,
-        theme: &app.theme,
+        theme,
     };
     crate::render::render_editor(f, view, inner, focused);
+}
+
+/// The tab bar: ` name × ` per open file, the active one in
+/// `tab_active`, the rest in `tab_inactive`; records the painted
+/// segments on `app` for mouse hit-testing.
+fn draw_tab_bar(f: &mut Frame, app: &mut App, bar: Rect) {
+    let segs = crate::tab::layout_bar(&app.tab_titles(), app.active, bar.width);
+    let spans: Vec<ratatui::text::Span> = segs
+        .iter()
+        .map(|s| {
+            let style = if s.active {
+                app.theme.tab_active
+            } else {
+                app.theme.tab_inactive
+            };
+            ratatui::text::Span::styled(s.text.clone(), style)
+        })
+        .collect();
+    f.render_widget(Paragraph::new(Line::from(spans)), bar);
+    app.tab_bar = Some((bar, segs));
 }
 
 /// The key cheat sheet, one `key  action` line per row, shared by the
@@ -379,7 +421,8 @@ fn key_lines() -> Vec<Line<'static>> {
         ("Ctrl+B/Ctrl+T", "panes"),
         ("?", "help"),
         ("s", "settings"),
-        ("Ctrl+W", "close file"),
+        ("Ctrl+W", "close tab"),
+        ("Opt+H / Opt+L", "prev / next tab"),
         ("q", "quit"),
     ];
     KEYS.iter()
@@ -452,24 +495,30 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
             s
         }
         Prompt::None => {
-            let path = app
-                .editor
-                .path
-                .as_deref()
-                .map(|p| crate::fuzzy::rel_display(app.tree.root(), p))
-                .unwrap_or_else(|| "[no file]".into());
-            let dirty = if app.editor.dirty { "*" } else { "" };
-            let (row, col) = app.editor.cursor();
-            let mut s = format!("{mode}| {path}{dirty}  {}:{}", row + 1, col + 1);
-            if app.editor.path.is_some() {
-                let words: usize = app
-                    .editor
-                    .lines()
-                    .iter()
-                    .map(|l| l.split_whitespace().count())
-                    .sum();
-                s.push_str(&format!(" · {words} words"));
-            }
+            let mut s = match app.tab() {
+                Some(tab) => {
+                    let path = tab
+                        .editor
+                        .path
+                        .as_deref()
+                        .map(|p| crate::fuzzy::rel_display(app.tree.root(), p))
+                        .unwrap_or_else(|| "[no file]".into());
+                    let dirty = if tab.editor.dirty { "*" } else { "" };
+                    let (row, col) = tab.editor.cursor();
+                    let words: usize = tab
+                        .editor
+                        .lines()
+                        .iter()
+                        .map(|l| l.split_whitespace().count())
+                        .sum();
+                    format!(
+                        "{mode}| {path}{dirty}  {}:{} · {words} words",
+                        row + 1,
+                        col + 1
+                    )
+                }
+                None => format!("{mode}| [no file]  1:1"),
+            };
             if let Some(msg) = &app.status {
                 s.push_str("  —  ");
                 s.push_str(msg);

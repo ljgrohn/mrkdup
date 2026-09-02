@@ -274,20 +274,3 @@ fn selected_text_spans_lines_and_is_none_when_empty() {
     ed.set_cursor(1, 2);
     assert_eq!(ed.selected_text().as_deref(), Some("bi"));
 }
-
-#[test]
-fn close_returns_to_the_pathless_empty_state() {
-    let p = tmpfile("close", "hello\r\nworld\r\n");
-    let mut ed = Editor::new();
-    ed.open(&p).unwrap();
-    ed.textarea.insert_str("!");
-    ed.mark_dirty();
-    ed.close();
-    assert!(ed.path.is_none());
-    assert!(!ed.dirty);
-    assert_eq!(ed.lines(), [""]);
-    assert_eq!(ed.newline, Newline::Lf);
-    assert!(matches!(ed.save(false).unwrap(), SaveOutcome::NoFile));
-    // nothing was written back
-    assert_eq!(fs::read_to_string(&p).unwrap(), "hello\r\nworld\r\n");
-}

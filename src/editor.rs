@@ -195,17 +195,6 @@ impl Editor {
         Some(out)
     }
 
-    /// Drop the open document: back to the empty, pathless state `new`
-    /// starts in. The caller saves first; this never touches disk.
-    pub fn close(&mut self) {
-        self.textarea = make_textarea(Vec::new());
-        self.path = None;
-        self.dirty = false;
-        self.mtime = None;
-        self.newline = Newline::Lf;
-        self.layout_cache.invalidate();
-    }
-
     pub fn selection_range(&self) -> Option<((usize, usize), (usize, usize))> {
         self.textarea.selection_range()
     }

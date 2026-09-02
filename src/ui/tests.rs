@@ -322,7 +322,11 @@ fn draw_records_the_pane_rects_for_mouse_hit_testing() {
     ));
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     assert_eq!(app.tree_area, Some(Rect::new(1, 1, 28, 9)));
-    assert_eq!(app.editor_area, Some(Rect::new(31, 1, 28, 9)));
+    // the tab bar takes the pane's top row
+    assert_eq!(app.editor_area, Some(Rect::new(31, 2, 28, 8)));
+    let (bar, segs) = app.tab_bar.clone().unwrap();
+    assert_eq!(bar, Rect::new(31, 1, 28, 1));
+    assert_eq!(segs.len(), 2);
 
     // hiding the tree drops its rect and widens the editor's
     app.handle_key(crossterm::event::KeyEvent::new(
@@ -331,5 +335,57 @@ fn draw_records_the_pane_rects_for_mouse_hit_testing() {
     ));
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     assert_eq!(app.tree_area, None);
-    assert_eq!(app.editor_area, Some(Rect::new(1, 1, 58, 9)));
+    assert_eq!(app.editor_area, Some(Rect::new(1, 2, 58, 8)));
+}
+
+#[test]
+fn tab_bar_shows_every_open_file_and_highlights_the_active_one() {
+    let root = std::env::temp_dir().join("mrkdup-ui-tabs");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("a.md"), "one\n").unwrap();
+    fs::write(root.join("b.md"), "two\n").unwrap();
+    let mut app = App::new(root, Config::default()).unwrap();
+    let enter = crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Enter,
+        crossterm::event::KeyModifiers::NONE,
+    );
+    let esc = crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Esc,
+        crossterm::event::KeyModifiers::NONE,
+    );
+    let j = crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('j'),
+        crossterm::event::KeyModifiers::NONE,
+    );
+    app.handle_key(enter);
+    app.handle_key(esc);
+    app.handle_key(j);
+    app.handle_key(enter);
+    let backend = TestBackend::new(70, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buf = terminal.backend().buffer();
+    let (bar, segs) = app.tab_bar.clone().unwrap();
+    let row: String = (bar.x..bar.x + bar.width)
+        .map(|x| buf.cell((x, bar.y)).unwrap().symbol().to_string())
+        .collect();
+    assert!(row.starts_with(" a.md ×  b.md × "), "{row:?}");
+    // the active tab (b.md) wears tab_active, the other tab_inactive
+    let a_cell = buf.cell((bar.x + segs[0].x0 + 1, bar.y)).unwrap();
+    let b_cell = buf.cell((bar.x + segs[2].x0 + 1, bar.y)).unwrap();
+    // compare fg/bg/modifiers: the buffer normalises underline_color
+    assert_eq!(
+        (b_cell.fg, b_cell.bg, b_cell.modifier),
+        (
+            app.theme.tab_active.fg.unwrap(),
+            app.theme.tab_active.bg.unwrap(),
+            app.theme.tab_active.add_modifier
+        )
+    );
+    assert_eq!(a_cell.modifier, app.theme.tab_inactive.add_modifier);
+    assert_ne!(a_cell.bg, b_cell.bg);
+    // the document text sits under the bar
+    let text = format!("{:?}", buf);
+    assert!(text.contains("two"));
 }

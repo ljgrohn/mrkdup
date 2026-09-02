@@ -26,6 +26,8 @@ pub struct Theme {
     pub prompt_cursor: Style, // the reversed " " in input popups
     pub welcome: Style,
     pub tree_open: Style, // currently White on Blue
+    pub tab_active: Style,
+    pub tab_inactive: Style,
     // syntax
     pub text: Style,
     pub mark: Style, // also LinkUrl, HtmlComment
@@ -70,6 +72,8 @@ impl Default for Theme {
             prompt_cursor: Style::default().add_modifier(Modifier::REVERSED),
             welcome: Style::default().add_modifier(Modifier::DIM),
             tree_open: Style::default().fg(Color::White).bg(Color::Blue),
+            tab_active: Style::default().fg(Color::White).bg(Color::Blue),
+            tab_inactive: Style::default().add_modifier(Modifier::DIM),
             text: Style::default(),
             mark: Style::default().add_modifier(Modifier::DIM),
             heading1: Style::default()
@@ -108,6 +112,8 @@ impl Theme {
             prompt_cursor: Style::default().add_modifier(Modifier::REVERSED),
             welcome: Style::default().add_modifier(Modifier::DIM),
             tree_open: Style::default().fg(Color::White).bg(Color::Blue),
+            tab_active: Style::default().fg(Color::White).bg(Color::Blue),
+            tab_inactive: Style::default().add_modifier(Modifier::DIM),
             text: Style::default(),
             mark: Style::default().add_modifier(Modifier::DIM),
             heading1: Style::default()
@@ -147,6 +153,8 @@ impl Theme {
             prompt_cursor: reversed,
             welcome: dim,
             tree_open: reversed,
+            tab_active: reversed,
+            tab_inactive: Style::default().add_modifier(Modifier::DIM),
             text: Style::default(),
             mark: dim,
             heading1: bold,
@@ -191,6 +199,8 @@ impl Theme {
             prompt_cursor: Style::default().add_modifier(Modifier::REVERSED),
             welcome: Style::default().fg(muted),
             tree_open: Style::default().fg(navy).bg(travertine),
+            tab_active: Style::default().fg(navy).bg(travertine),
+            tab_inactive: Style::default().add_modifier(Modifier::DIM),
             text: Style::default().fg(limestone),
             mark: Style::default().fg(muted),
             heading1: Style::default().fg(gilded).add_modifier(Modifier::BOLD),
@@ -235,6 +245,8 @@ impl Theme {
             prompt_cursor: Style::default().add_modifier(Modifier::REVERSED),
             welcome: Style::default().fg(comment),
             tree_open: Style::default().fg(bg).bg(blue),
+            tab_active: Style::default().fg(bg).bg(blue),
+            tab_inactive: Style::default().add_modifier(Modifier::DIM),
             text: Style::default().fg(fg),
             mark: Style::default().fg(comment),
             heading1: Style::default().fg(blue).add_modifier(Modifier::BOLD),
@@ -471,6 +483,8 @@ pub fn parse_overlay(text: &str, theme: &mut Theme) -> Vec<String> {
             "prompt_cursor" => &mut theme.prompt_cursor,
             "welcome" => &mut theme.welcome,
             "tree_open" => &mut theme.tree_open,
+            "tab_active" => &mut theme.tab_active,
+            "tab_inactive" => &mut theme.tab_inactive,
             "text" => &mut theme.text,
             "mark" => &mut theme.mark,
             "heading1" => &mut theme.heading1,

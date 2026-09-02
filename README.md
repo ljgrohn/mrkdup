@@ -42,9 +42,11 @@ mrkdup [directory]   # defaults to the current directory
 | global | Ctrl+T | show/hide editor pane (tree goes full width) |
 | global | Ctrl+P (tree: p) | go to file (fuzzy finder popup: type to filter, ↑/↓ or Ctrl+J/K choose, Enter opens) |
 | global | Ctrl+Q / Ctrl+C (tree: q) | quit (works even in prompts; autosaves; if disk changed, warns — press again to discard) |
-| global | Ctrl+W | close the open file (autosaves; a disk conflict keeps it open, as when switching files) — back to the launch page with the tree focused |
+| global | Ctrl+W | close the active tab (autosaves; a disk conflict keeps it open) — the tab to its left takes over, or the launch page with the tree focused when it was the last |
+| global | Opt+H / Opt+L | previous / next tab (wraps) |
+| global | Opt+1 … Opt+9 | jump to that tab |
 | editor | Esc / Shift+Tab | focus tree |
-| tree | Enter / Tab | open file (or expand/collapse dir) |
+| tree | Enter / Tab | open file in a new tab right of the current one — or switch to its tab if it's already open (a dir expands/collapses) |
 | tree | j/k, ↑/↓ | move selection |
 | tree | h/l, ←/→ | collapse / expand |
 | tree | g / G | jump to top / bottom |
@@ -67,6 +69,10 @@ mrkdup [directory]   # defaults to the current directory
 | editor | Opt+J / Opt+K | next / previous paragraph |
 | editor | Cmd+J / Cmd+K | end / start of line |
 
+### Tabs
+
+Every file you open gets a tab in the bar across the top of the editor pane: `name ×`, with a `*` after the name while the buffer has unsaved changes. The active tab is highlighted (theme keys `tab_active` / `tab_inactive`). When there are more tabs than fit, the bar scrolls so the active one stays visible. Idle autosave and reload-on-external-change run for every tab, not just the one on screen; switching away from a tab saves it; quitting saves them all (a disk conflict in any tab stops the quit with the usual warning, and Ctrl+Q again discards). Renaming or moving a file in the tree follows it into its tab; deleting one closes its tab.
+
 ### Mouse
 
 mrkdup takes over the mouse, so a click and a drag act on the pane they land in instead of the terminal painting one selection across the tree and the editor together.
@@ -76,6 +82,7 @@ mrkdup takes over the mouse, so a click and a drag act on the pane they land in 
 | editor | click lands the cursor (and focuses the editor); drag selects; the selection is confined to the editor pane — drag over the tree or past the top/bottom edge and it keeps extending (scrolling a row at a time) |
 | editor | releasing a drag copies the selection to the system clipboard through OSC 52 (iTerm2, kitty, WezTerm, Ghostty, Alacritty, foot, tmux with `set-clipboard on`; Terminal.app ignores it) |
 | editor | wheel moves the cursor three lines |
+| tab bar | click a name to switch to that tab; click its × to close it (same as Ctrl+W) |
 | tree | click selects the row and opens it (a folder toggles), like Enter; wheel moves the selection three rows |
 
 Hold Shift while dragging to get the terminal's own selection back (Option in some macOS terminals).
@@ -168,7 +175,8 @@ The settable keys are the `Theme` struct's field names — every pane
 and syntax slot mrkdup paints:
 
 `border_focused`, `border_unfocused`, `popup_border`, `status_bar`,
-`selection`, `prompt_cursor`, `welcome`, `tree_open`, `text`, `mark`,
+`selection`, `prompt_cursor`, `welcome`, `tree_open`, `tab_active`,
+`tab_inactive`, `text`, `mark`,
 `heading1`, `heading2`, `heading`, `bold`, `italic`, `code`,
 `checkbox`, `done`, `quote`, `link`, `bullet`, `html_tag`,
 `html_attr`, `search_match`.
