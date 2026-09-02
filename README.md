@@ -56,7 +56,7 @@ mrkdup [directory]   # defaults to the current directory
 | tree | + | zoom in: make the selected folder the tree root (a file: its folder) |
 | tree | . | toggle hidden files (dotfiles and anything matched by `.gitignore`) |
 | tree | ? | show the key cheat sheet (the launch page) over the editor; any key closes it |
-| tree | s | settings popup: h/l or ←/→ cycle the theme (applies live and is written to the config file); Esc closes |
+| tree | s | settings popup: h/l or ←/→ cycle the selected setting — theme, side padding (applies live and is written to the config file); j/k pick the row; Esc closes |
 | editor | Ctrl+S | save (after a disk-conflict warning, a second Ctrl+S overwrites) |
 | editor | Ctrl+Z / Ctrl+Y | undo / redo |
 | editor | Ctrl+D | toggle checkbox on the line (`- [ ]` ↔ `- [x]`, `- [X]` → `- [ ]`; other lines gain a `- [ ] ` prefix; Ctrl+Z twice undoes) |
@@ -79,9 +79,9 @@ optional — no file means all defaults — and it never causes a crash:
 lines that can't be parsed (or name an unknown option) are ignored, with
 a one-line warning in the status bar.
 
-The `theme` key can also be changed from inside mrkdup: press `s` in the
-tree pane; the choice applies immediately and is written back to this
-file.
+`theme` and `side_padding` can also be changed from inside mrkdup: press
+`s` in the tree pane; the choice applies immediately and is written back
+to this file.
 
 The format is plain `key = value` lines; a line starting with `#` is a
 comment (inline comments after a value are not supported) and blank
@@ -93,6 +93,7 @@ clamped into the ranges below.
 tree_width = 30
 side_margin_percent = 5
 autosave_seconds = 10
+side_padding = 1
 # default | light | mono | firmitas | tokyonight
 theme = default
 ```
@@ -104,6 +105,7 @@ theme = default
 | `top_margin_percent` | 3 | 0–40 | editor breathing room: % of pane height trimmed off the top |
 | `autosave_seconds` | 2 | 1–600 | idle seconds before a dirty buffer autosaves |
 | `tree_refresh_seconds` | 2 | 1–600 | seconds between automatic tree refreshes |
+| `side_padding` | 1 | 0–20 | columns of empty space between the terminal edges and the panes (padding outside the borders; `side_margin_percent` is the text margin inside the editor) |
 | `theme` | `default` | see below | `default` (current look), `light` (dark fg for light terminals), `mono` (no color, modifiers only), `firmitas` (Omarchy navy/bronze/gold, truecolor), `tokyonight` (truecolor), or any other name — see Themes |
 
 ### Themes

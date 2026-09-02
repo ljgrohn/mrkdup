@@ -304,7 +304,8 @@ impl App {
 
     /// Build the settings rows. The theme row lists the builtins, then
     /// the user's `themes/` files; it starts on the configured name (or
-    /// `default` if that name isn't in the list).
+    /// `default` if that name isn't in the list). The side-padding row
+    /// lists every column 0..=20.
     fn open_settings(&mut self) {
         let mut choices: Vec<String> = crate::theme::BUILTINS
             .iter()
@@ -317,44 +318,64 @@ impl App {
             .iter()
             .position(|c| *c == self.config.theme_name)
             .unwrap_or(0);
+        let padding_choices: Vec<String> = (0..=20u16).map(|n| n.to_string()).collect();
+        let padding_index = (self.config.side_padding as usize).min(20);
         self.prompt = Prompt::Settings {
-            rows: vec![SettingRow {
-                name: "theme",
-                choices,
-                index,
-            }],
+            rows: vec![
+                SettingRow {
+                    name: "theme",
+                    choices,
+                    index,
+                },
+                SettingRow {
+                    name: "side_padding",
+                    choices: padding_choices,
+                    index: padding_index,
+                },
+            ],
             selected: 0,
         };
     }
 
-    /// A settings row changed: apply the new value live and persist it.
-    /// Only `theme` exists today. The theme goes through `load_from` so
-    /// `themes/<name>` and the overlay file both apply, exactly as at
-    /// startup; the config file is rewritten in place.
+    /// A settings row changed: apply the new value live and persist it
+    /// as `<row> = <value>` in the config file. The theme goes through
+    /// `load_from` so `themes/<name>` and the overlay file both apply,
+    /// exactly as at startup.
     fn apply_setting(&mut self, row: &str, value: &str) {
-        if row != "theme" {
-            return;
-        }
-        let (theme, warnings, saved) = match &self.config_dir {
-            Some(dir) => {
-                let (theme, warnings) = crate::theme::load_from(value, dir);
-                let saved = crate::config::save_theme_name_to(&dir.join("config"), value)
-                    .map_err(|e| e.to_string());
-                (theme, warnings, saved)
+        let mut warnings: Vec<String> = Vec::new();
+        match row {
+            "theme" => {
+                self.theme = match &self.config_dir {
+                    Some(dir) => {
+                        let (theme, w) = crate::theme::load_from(value, dir);
+                        warnings = w;
+                        theme
+                    }
+                    None => Theme::named(value),
+                };
+                self.config.theme_name = value.to_string();
             }
-            None => (
-                Theme::named(value),
-                Vec::new(),
-                Err("no config dir".to_string()),
-            ),
-        };
-        self.theme = theme;
-        self.config.theme_name = value.to_string();
+            "side_padding" => {
+                self.config.side_padding = value.parse::<u16>().unwrap_or(1).min(20);
+            }
+            _ => return,
+        }
+        let saved = self.persist_setting(row, value);
         self.status = Some(match (saved, warnings.first()) {
-            (Ok(()), None) => format!("theme: {value}"),
-            (Ok(()), Some(w)) => format!("theme: {value} — {w}"),
-            (Err(e), _) => format!("theme: {value} (not saved: {e})"),
+            (Ok(()), None) => format!("{row}: {value}"),
+            (Ok(()), Some(w)) => format!("{row}: {value} — {w}"),
+            (Err(e), _) => format!("{row}: {value} (not saved: {e})"),
         });
+    }
+
+    /// Write one setting back to `config_dir/config`; `Err` carries the
+    /// reason for the status line.
+    fn persist_setting(&self, key: &str, value: &str) -> Result<(), String> {
+        match &self.config_dir {
+            Some(dir) => crate::config::save_key_to(&dir.join("config"), key, value)
+                .map_err(|e| e.to_string()),
+            None => Err("no config dir".to_string()),
+        }
     }
 
     fn confirm_delete(&mut self) {

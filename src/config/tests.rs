@@ -154,48 +154,48 @@ fn load_reads_xdg_config_home_and_defaults_when_absent() {
 }
 
 #[test]
-fn rewrite_theme_line_replaces_in_place_and_keeps_everything_else() {
+fn rewrite_key_line_replaces_in_place_and_keeps_everything_else() {
     let text = "# my config\ntree_width = 40\n  theme = light\nautosave_seconds = 5\n";
     assert_eq!(
-        rewrite_theme_line(text, "mono"),
+        rewrite_key_line(text, "theme", "mono"),
         "# my config\ntree_width = 40\n  theme = mono\nautosave_seconds = 5\n"
     );
 }
 
 #[test]
-fn rewrite_theme_line_ignores_commented_out_and_lookalike_keys() {
+fn rewrite_key_line_ignores_commented_out_and_lookalike_keys() {
     let text = "# theme = light\ntheme_name = x\nthemes = y\n";
     assert_eq!(
-        rewrite_theme_line(text, "mono"),
+        rewrite_key_line(text, "theme", "mono"),
         "# theme = light\ntheme_name = x\nthemes = y\ntheme = mono\n"
     );
 }
 
 #[test]
-fn rewrite_theme_line_only_rewrites_the_first_duplicate() {
+fn rewrite_key_line_only_rewrites_the_first_duplicate() {
     let text = "theme=light\ntheme = mono\n";
     assert_eq!(
-        rewrite_theme_line(text, "firmitas"),
+        rewrite_key_line(text, "theme", "firmitas"),
         "theme = firmitas\ntheme = mono\n"
     );
 }
 
 #[test]
-fn rewrite_theme_line_appends_with_and_without_trailing_newline() {
+fn rewrite_key_line_appends_with_and_without_trailing_newline() {
     assert_eq!(
-        rewrite_theme_line("tree_width = 40\n", "light"),
+        rewrite_key_line("tree_width = 40\n", "theme", "light"),
         "tree_width = 40\ntheme = light\n"
     );
     assert_eq!(
-        rewrite_theme_line("tree_width = 40", "light"),
+        rewrite_key_line("tree_width = 40", "theme", "light"),
         "tree_width = 40\ntheme = light\n"
     );
-    assert_eq!(rewrite_theme_line("", "light"), "theme = light\n");
+    assert_eq!(rewrite_key_line("", "theme", "light"), "theme = light\n");
 }
 
 #[test]
-fn rewrite_theme_line_output_reparses_to_the_new_name() {
-    let out = rewrite_theme_line("tree_width = 40\ntheme = light\n", "tokyonight");
+fn rewrite_key_line_output_reparses_to_the_new_name() {
+    let out = rewrite_key_line("tree_width = 40\ntheme = light\n", "theme", "tokyonight");
     let (cfg, warnings) = parse(&out);
     assert!(warnings.is_empty(), "{warnings:?}");
     assert_eq!(cfg.theme_name, "tokyonight");
@@ -203,22 +203,52 @@ fn rewrite_theme_line_output_reparses_to_the_new_name() {
 }
 
 #[test]
-fn save_theme_name_to_creates_the_file_and_preserves_other_keys() {
+fn save_key_to_creates_the_file_and_preserves_other_keys() {
     let dir = std::env::temp_dir().join("mrkdup-config-save");
     let _ = std::fs::remove_dir_all(&dir);
     let path = dir.join("mrkdup").join("config");
 
     // missing dir + file: created with just the theme line
-    save_theme_name_to(&path, "mono").unwrap();
+    save_key_to(&path, "theme", "mono").unwrap();
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "theme = mono\n");
 
     // existing file: other keys and comments survive, theme rewritten
     std::fs::write(&path, "# keep me\ntree_width = 42\ntheme = mono\n").unwrap();
-    save_theme_name_to(&path, "light").unwrap();
+    save_key_to(&path, "theme", "light").unwrap();
     let text = std::fs::read_to_string(&path).unwrap();
     assert_eq!(text, "# keep me\ntree_width = 42\ntheme = light\n");
     let (cfg, warnings) = parse(&text);
     assert!(warnings.is_empty());
     assert_eq!(cfg.tree_width, 42);
     assert_eq!(cfg.theme_name, "light");
+}
+
+#[test]
+fn side_padding_parses_clamps_and_defaults() {
+    assert_eq!(Config::default().side_padding, 1);
+    let (cfg, warnings) = parse("side_padding = 3\n");
+    assert!(warnings.is_empty());
+    assert_eq!(cfg.side_padding, 3);
+    let (cfg, _) = parse("side_padding = 99\n");
+    assert_eq!(cfg.side_padding, 20);
+    let (cfg, _) = parse("side_padding = -4\n");
+    assert_eq!(cfg.side_padding, 0);
+    let (_, warnings) = parse("side_padding = wide\n");
+    assert!(warnings[0].contains("not a number"));
+}
+
+#[test]
+fn rewrite_key_line_is_generic_over_the_key() {
+    assert_eq!(
+        rewrite_key_line("theme = light\n", "side_padding", "2"),
+        "theme = light\nside_padding = 2\n"
+    );
+    assert_eq!(
+        rewrite_key_line(
+            "side_padding = 1\nside_padding_x = 9\n",
+            "side_padding",
+            "3"
+        ),
+        "side_padding = 3\nside_padding_x = 9\n"
+    );
 }

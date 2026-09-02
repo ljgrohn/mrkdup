@@ -17,6 +17,10 @@ pub struct Config {
     pub autosave_seconds: u64,
     /// Seconds between automatic tree refreshes (1..=600).
     pub tree_refresh_seconds: u64,
+    /// Columns of empty space between the terminal edges and the panes
+    /// (0..=20). Padding *outside* the borders; `side_margin_percent`
+    /// is the text margin inside the editor pane.
+    pub side_padding: u16,
     /// Builtin color theme (`default`, `light`, `mono`), or the name of
     /// a file under `$XDG_CONFIG_HOME/mrkdup/themes/`; validated by `valid_theme_name`.
     pub theme_name: String,
@@ -30,6 +34,7 @@ impl Default for Config {
             top_margin_percent: 3,
             autosave_seconds: 2,
             tree_refresh_seconds: 2,
+            side_padding: 1,
             theme_name: "default".to_string(),
         }
     }
@@ -67,7 +72,8 @@ pub fn parse(text: &str) -> (Config, Vec<String>) {
             | "side_margin_percent"
             | "top_margin_percent"
             | "autosave_seconds"
-            | "tree_refresh_seconds" => {
+            | "tree_refresh_seconds"
+            | "side_padding" => {
                 let Ok(v) = value.parse::<i64>() else {
                     warnings.push(format!("line {n}: {key}: not a number: {value:?}"));
                     continue;
@@ -78,6 +84,7 @@ pub fn parse(text: &str) -> (Config, Vec<String>) {
                     "top_margin_percent" => cfg.top_margin_percent = v.clamp(0, 40) as u16,
                     "autosave_seconds" => cfg.autosave_seconds = v.clamp(1, 600) as u64,
                     "tree_refresh_seconds" => cfg.tree_refresh_seconds = v.clamp(1, 600) as u64,
+                    "side_padding" => cfg.side_padding = v.clamp(0, 20) as u16,
                     _ => unreachable!(),
                 }
             }
@@ -133,22 +140,23 @@ pub fn load() -> (Config, Vec<String>) {
     }
 }
 
-/// `text` with the first `theme = …` line replaced by `theme = <name>`
+/// `text` with the first `<key> = …` line replaced by `<key> = <value>`
 /// (leading indentation kept; the parser has no inline comments, so the
-/// whole rest of the line is the value), or with `theme = <name>`
-/// appended when no such line exists. Commented-out lines and other
-/// keys that merely start with `theme` (`theme_name`) don't count.
-/// Other lines are copied verbatim; the output always ends in `\n`.
-/// Pure, so the settings popup's write-back is testable without disk.
-pub fn rewrite_theme_line(text: &str, name: &str) -> String {
+/// whole rest of the line is the value), or with `<key> = <value>`
+/// appended when no such line exists. Commented-out lines and keys that
+/// merely start with `key` (`theme_name` for `theme`) don't count. Other
+/// lines are copied verbatim; the output always ends in `\n`. Pure, so
+/// the settings popup's write-back is testable without disk.
+pub fn rewrite_key_line(text: &str, key: &str, value: &str) -> String {
     let mut out = String::with_capacity(text.len() + 32);
     let mut replaced = false;
     for line in text.lines() {
-        if !replaced && is_theme_line(line) {
+        if !replaced && is_key_line(line, key) {
             let indent = &line[..line.len() - line.trim_start().len()];
             out.push_str(indent);
-            out.push_str("theme = ");
-            out.push_str(name);
+            out.push_str(key);
+            out.push_str(" = ");
+            out.push_str(value);
             replaced = true;
         } else {
             out.push_str(line);
@@ -156,26 +164,27 @@ pub fn rewrite_theme_line(text: &str, name: &str) -> String {
         out.push('\n');
     }
     if !replaced {
-        out.push_str("theme = ");
-        out.push_str(name);
+        out.push_str(key);
+        out.push_str(" = ");
+        out.push_str(value);
         out.push('\n');
     }
     out
 }
 
-/// `theme` followed by optional spaces and `=`, after any indentation.
-fn is_theme_line(line: &str) -> bool {
+/// `key` followed by optional spaces and `=`, after any indentation.
+fn is_key_line(line: &str, key: &str) -> bool {
     line.trim_start()
-        .strip_prefix("theme")
+        .strip_prefix(key)
         .map(|rest| rest.trim_start().starts_with('='))
         .unwrap_or(false)
 }
 
-/// Persist `name` as the `theme` key of the config file at `path`:
-/// read it (missing = empty), rewrite the line, write atomically.
-/// Creates the parent directory if needed. Only the settings popup
-/// calls this — startup never writes the config.
-pub fn save_theme_name_to(path: &Path, name: &str) -> io::Result<()> {
+/// Persist one `key = value` in the config file at `path`: read it
+/// (missing = empty), rewrite the line, write atomically. Creates the
+/// parent directory if needed. Only the settings popup calls this —
+/// startup never writes the config.
+pub fn save_key_to(path: &Path, key: &str, value: &str) -> io::Result<()> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
@@ -184,7 +193,7 @@ pub fn save_theme_name_to(path: &Path, name: &str) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    crate::fsutil::atomic_write(path, rewrite_theme_line(&text, name).as_bytes())
+    crate::fsutil::atomic_write(path, rewrite_key_line(&text, key, value).as_bytes())
 }
 
 #[cfg(test)]

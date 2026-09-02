@@ -257,3 +257,50 @@ fn settings_popup_renders_the_theme_row_and_status() {
         "status missing from hint line: {text}"
     );
 }
+
+fn draw_buffer(app: &mut App) -> ratatui::buffer::Buffer {
+    let backend = TestBackend::new(80, 16);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, app)).unwrap();
+    terminal.backend().buffer().clone()
+}
+
+#[test]
+fn side_padding_insets_the_panes_from_the_terminal_edges() {
+    let root = fixture("side-padding", "# Title\n");
+    let cfg = Config {
+        side_padding: 3,
+        ..Config::default()
+    };
+    let mut app = App::new(root, cfg).unwrap();
+    let buf = draw_buffer(&mut app);
+    for x in 0..3u16 {
+        assert_eq!(buf[(x, 0)].symbol(), " ", "left padding column {x}");
+        assert_eq!(
+            buf[(79 - x, 0)].symbol(),
+            " ",
+            "right padding column {}",
+            79 - x
+        );
+    }
+    assert_ne!(
+        buf[(3, 0)].symbol(),
+        " ",
+        "tree border should start at column 3"
+    );
+    assert_ne!(
+        buf[(76, 0)].symbol(),
+        " ",
+        "editor border should end at column 76"
+    );
+
+    // default is one column
+    let mut app = App::new(
+        fixture("side-padding-default", "# Title\n"),
+        Config::default(),
+    )
+    .unwrap();
+    let buf = draw_buffer(&mut app);
+    assert_eq!(buf[(0, 0)].symbol(), " ");
+    assert_ne!(buf[(1, 0)].symbol(), " ");
+}

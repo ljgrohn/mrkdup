@@ -1016,7 +1016,7 @@ fn s_in_tree_opens_settings_on_the_current_theme() {
         panic!("expected Settings prompt");
     };
     assert_eq!(*selected, 0);
-    assert_eq!(rows.len(), 1);
+    assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].name, "theme");
     assert_eq!(rows[0].value(), "mono");
     assert_eq!(
@@ -1109,5 +1109,54 @@ fn settings_persists_the_choice_and_lists_user_themes_from_config_dir() {
     assert_eq!(
         std::fs::read_to_string(cfg_dir.join("config")).unwrap(),
         "tree_width = 33\ntheme = forest\n"
+    );
+}
+
+#[test]
+fn settings_second_row_cycles_side_padding_and_persists() {
+    let root = fixture("settings-padding");
+    let cfg_dir = root.parent().unwrap().join("xdg");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
+    std::fs::write(cfg_dir.join("config"), "theme = default\n").unwrap();
+    let mut app = App::new(root, Config::default()).unwrap();
+    app.config_dir = Some(cfg_dir.clone());
+
+    app.handle_key(key(KeyCode::Char('s')));
+    let Prompt::Settings { rows, selected } = &app.prompt else {
+        panic!("expected Settings prompt");
+    };
+    assert_eq!(*selected, 0);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1].name, "side_padding");
+    assert_eq!(rows[1].value(), "1");
+    assert_eq!(rows[1].choices.len(), 21);
+
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Char('l')));
+    assert_eq!(app.config.side_padding, 2);
+    assert_eq!(app.status.as_deref(), Some("side_padding: 2"));
+    assert_eq!(
+        std::fs::read_to_string(cfg_dir.join("config")).unwrap(),
+        "theme = default\nside_padding = 2\n"
+    );
+
+    // j clamps at the last row; h wraps 0 → 20
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('h')));
+    assert_eq!(app.config.side_padding, 20);
+}
+
+#[test]
+fn settings_side_padding_without_config_dir_applies_but_reports_unsaved() {
+    let mut app = App::new(fixture("settings-padding-nodir"), Config::default()).unwrap();
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_key(key(KeyCode::Down));
+    app.handle_key(key(KeyCode::Left));
+    assert_eq!(app.config.side_padding, 0);
+    assert_eq!(
+        app.status.as_deref(),
+        Some("side_padding: 0 (not saved: no config dir)")
     );
 }

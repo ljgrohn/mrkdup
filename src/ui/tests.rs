@@ -121,7 +121,10 @@ fn go_to_file_popup_lists_filtered_results() {
     for c in "ban".chars() {
         app.handle_key(key(crossterm::event::KeyCode::Char(c)));
     }
-    let backend = TestBackend::new(60, 20);
+    // +2 over the tight 60 columns the status line needs: the default
+    // 1-column side padding would otherwise clip "Enter open" off the
+    // right edge.
+    let backend = TestBackend::new(62, 20);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let text = format!("{:?}", terminal.backend().buffer());
@@ -284,8 +287,9 @@ fn tree_pane_width_comes_from_config() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buf = terminal.backend().buffer();
-    // tree occupies columns 0..20: its top-right corner sits at x=19
-    // and the editor block starts at x=20 (default would be 29/30)
-    assert_eq!(buf.cell((19u16, 0u16)).unwrap().symbol(), "┐");
-    assert_eq!(buf.cell((20u16, 0u16)).unwrap().symbol(), "┌");
+    // tree occupies columns 0..20 inside the default 1-column side
+    // padding: its top-right corner sits at x=20 and the editor block
+    // starts at x=21 (default tree_width would put these at 29/30)
+    assert_eq!(buf.cell((20u16, 0u16)).unwrap().symbol(), "┐");
+    assert_eq!(buf.cell((21u16, 0u16)).unwrap().symbol(), "┌");
 }

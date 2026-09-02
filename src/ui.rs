@@ -16,8 +16,8 @@ fn border_style(focused: bool, theme: &Theme) -> Style {
 }
 
 pub fn draw(f: &mut Frame, app: &mut App) {
-    let [main, status] =
-        Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(f.area());
+    let area = with_side_padding(f.area(), app.config.side_padding);
+    let [main, status] = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
 
     if app.tree_visible && app.editor_visible {
         let [tree_area, editor_area] = Layout::horizontal([
@@ -209,8 +209,16 @@ fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
         f.render_widget(Paragraph::new(lines), inner);
     }
     if let Prompt::Settings { rows, selected } = &app.prompt {
-        let name_w = rows.iter().map(|r| r.name.len()).max().unwrap_or(0);
-        let value_w = rows.iter().map(|r| r.value().len()).max().unwrap_or(0);
+        let name_w = rows
+            .iter()
+            .map(|r| r.name.chars().count())
+            .max()
+            .unwrap_or(0);
+        let value_w = rows
+            .iter()
+            .map(|r| r.value().chars().count())
+            .max()
+            .unwrap_or(0);
         let width = ((name_w + value_w + 12) as u16).max(40);
         let height = (rows.len() as u16 + 2).min(area.height);
         let popup = centered_rect(width, height, area);
@@ -224,7 +232,7 @@ fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
             .map(|(i, r)| {
                 let value = format!("‹ {} ›", r.value());
                 let gap = (inner.width as usize)
-                    .saturating_sub(r.name.len() + value.len() + 2)
+                    .saturating_sub(r.name.chars().count() + value.chars().count() + 2)
                     .max(1);
                 let mut line = Line::from(format!(" {}{}{} ", r.name, " ".repeat(gap), value));
                 if i == *selected {
@@ -365,7 +373,7 @@ fn key_lines() -> Vec<Line<'static>> {
         ("u", "refresh"),
         ("Ctrl+B/Ctrl+T", "panes"),
         ("?", "help"),
-        ("s", "settings (theme)"),
+        ("s", "settings"),
         ("q", "quit"),
     ];
     KEYS.iter()
@@ -384,6 +392,18 @@ fn draw_welcome(f: &mut Frame, area: Rect, theme: &Theme) {
     let width = lines.iter().map(|l| l.width()).max().unwrap_or(0) as u16;
     let rect = centered_rect(width, lines.len() as u16, area);
     f.render_widget(Paragraph::new(lines).style(theme.welcome), rect);
+}
+
+/// Inset `r` by `pad` columns on each side — empty terminal background
+/// between the edges and the panes. Capped so at least half the width
+/// survives on tiny terminals.
+fn with_side_padding(r: Rect, pad: u16) -> Rect {
+    let pad = pad.min(r.width / 4);
+    Rect {
+        x: r.x + pad,
+        width: r.width.saturating_sub(pad * 2),
+        ..r
+    }
 }
 
 /// Inset a rect by `side_pct`% of its width on each side and `top_pct`%
