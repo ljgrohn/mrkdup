@@ -410,3 +410,200 @@ fn rust_function_names_and_raw_identifiers() {
     assert_eq!(kind_of(line, &s[0], "while"), Kind::Keyword);
     assert_eq!(kind_of(line, &s[0], "f()"), Kind::Function);
 }
+
+// ---- javascript / css / sql -----------------------------------------
+
+fn code(lines: &[&str], kind: FileKind) -> Vec<Vec<SpanTok>> {
+    let v: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+    highlight(&v, kind)
+}
+
+#[test]
+fn extensions_map_to_code_kinds() {
+    use std::path::Path;
+    for (name, kind) in [
+        ("app.js", FileKind::JavaScript),
+        ("app.mjs", FileKind::JavaScript),
+        ("App.TSX", FileKind::JavaScript),
+        ("types.ts", FileKind::JavaScript),
+        ("site.css", FileKind::Css),
+        ("site.scss", FileKind::Css),
+        ("schema.sql", FileKind::Sql),
+        ("lib.rs", FileKind::Rust),
+        ("index.htm", FileKind::Html),
+        ("notes.txt", FileKind::Markdown),
+    ] {
+        assert_eq!(file_kind(Some(Path::new(name))), kind, "{name}");
+    }
+}
+
+#[test]
+fn js_keywords_types_functions_strings_and_comments() {
+    let line = "const total = compute(items.length) + Math.max(1, 2); // sum";
+    let s = code(&[line], FileKind::JavaScript);
+    assert_covers(&s[0], line.chars().count());
+    assert_eq!(kind_of(line, &s[0], "const"), Kind::Keyword);
+    assert_eq!(kind_of(line, &s[0], "total"), Kind::Text);
+    assert_eq!(kind_of(line, &s[0], "compute"), Kind::Function);
+    assert_eq!(kind_of(line, &s[0], "items"), Kind::Text);
+    assert_eq!(kind_of(line, &s[0], "Math"), Kind::TypeName);
+    assert_eq!(kind_of(line, &s[0], "max"), Kind::Function);
+    assert_eq!(kind_of(line, &s[0], "2"), Kind::Number);
+    assert_eq!(kind_of(line, &s[0], "// sum"), Kind::Comment);
+    let line = "let s: string = 'it\\'s' + \"x\"; @decorator class Foo extends Bar {}";
+    let s = code(&[line], FileKind::JavaScript);
+    assert_eq!(kind_of(line, &s[0], "string"), Kind::TypeName);
+    assert_eq!(kind_of(line, &s[0], "'it"), Kind::Str);
+    assert_eq!(kind_of(line, &s[0], "\"x\""), Kind::Str);
+    assert_eq!(kind_of(line, &s[0], "@decorator"), Kind::Macro);
+    assert_eq!(kind_of(line, &s[0], "class"), Kind::Keyword);
+    assert_eq!(kind_of(line, &s[0], "Foo"), Kind::TypeName);
+}
+
+#[test]
+fn js_template_literals_and_block_comments_span_lines() {
+    let s = code(
+        &[
+            "const t = `line one",
+            "line two`; /* open",
+            "close */ let x = 1;",
+        ],
+        FileKind::JavaScript,
+    );
+    assert_eq!(kinds(&s[0]), vec![Kind::Keyword, Kind::Text, Kind::Str]);
+    assert_eq!(kinds(&s[1]), vec![Kind::Str, Kind::Text, Kind::Comment]);
+    assert_eq!(kinds(&s[2])[0], Kind::Comment);
+    assert_eq!(kind_of("close */ let x = 1;", &s[2], "let"), Kind::Keyword);
+    // a plain quote does not carry across lines
+    let s = code(&["a = 'open", "b = 1"], FileKind::JavaScript);
+    assert_eq!(kind_of("b = 1", &s[1], "b"), Kind::Text);
+}
+
+#[test]
+fn css_selectors_properties_values_and_at_rules() {
+    let src = [
+        "@media (max-width: 600px) {",
+        "  .card > a:hover, #main { color: #fff; margin: -2px 1.5em !important; }",
+        "}",
+        "body { background: url(http://x/y.png) rgb(0, 0, 0); }",
+        "/* multi",
+        "line */ h1 { }",
+    ];
+    let s = code(&src, FileKind::Css);
+    for (line, spans) in src.iter().zip(&s) {
+        assert_covers(spans, line.chars().count());
+    }
+    assert_eq!(kind_of(src[0], &s[0], "@media"), Kind::Macro);
+    assert_eq!(kind_of(src[0], &s[0], "600px"), Kind::Number);
+    assert_eq!(kind_of(src[1], &s[1], ".card"), Kind::TypeName);
+    assert_eq!(kind_of(src[1], &s[1], "#main"), Kind::TypeName);
+    assert_eq!(kind_of(src[1], &s[1], "color"), Kind::Keyword);
+    assert_eq!(kind_of(src[1], &s[1], "#fff"), Kind::Number);
+    assert_eq!(kind_of(src[1], &s[1], "margin"), Kind::Keyword);
+    assert_eq!(kind_of(src[1], &s[1], "-2px"), Kind::Number);
+    assert_eq!(kind_of(src[1], &s[1], "1.5em"), Kind::Number);
+    assert_eq!(kind_of(src[1], &s[1], "!important"), Kind::Keyword);
+    assert_eq!(kind_of(src[3], &s[3], "body"), Kind::TypeName);
+    assert_eq!(kind_of(src[3], &s[3], "url"), Kind::Function);
+    assert_eq!(kind_of(src[3], &s[3], "http"), Kind::Str); // the URL, not a // comment
+    assert_eq!(kind_of(src[3], &s[3], "rgb"), Kind::Function);
+    assert_eq!(kinds(&s[4]), vec![Kind::Comment]);
+    assert_eq!(kind_of(src[5], &s[5], "line */"), Kind::Comment);
+    assert_eq!(kind_of(src[5], &s[5], "h1"), Kind::TypeName);
+}
+
+#[test]
+fn scss_nesting_variables_and_line_comments() {
+    let src = [
+        "$gap: 4px;",
+        ".a {",
+        "  // note",
+        "  &:hover { padding: $gap; }",
+        "  .b { x: y }",
+        "}",
+    ];
+    let s = code(&src, FileKind::Css);
+    assert_eq!(kind_of(src[0], &s[0], "$gap"), Kind::Text);
+    assert_eq!(kind_of(src[0], &s[0], "4px"), Kind::Number);
+    assert_eq!(kinds(&s[2]), vec![Kind::Text, Kind::Comment]);
+    assert_eq!(kind_of(src[3], &s[3], "&:hover"), Kind::TypeName);
+    assert_eq!(kind_of(src[3], &s[3], "padding"), Kind::Keyword);
+    assert_eq!(kind_of(src[3], &s[3], "$gap"), Kind::Text);
+    assert_eq!(kind_of(src[4], &s[4], ".b"), Kind::TypeName);
+    assert_eq!(kind_of(src[4], &s[4], "x:"), Kind::Keyword);
+}
+
+#[test]
+fn sql_is_case_insensitive_with_types_functions_and_comments() {
+    let line = "SELECT count(*), name FROM users u WHERE id > 10 AND note = 'it''s' -- tail";
+    let s = code(&[line], FileKind::Sql);
+    assert_covers(&s[0], line.chars().count());
+    assert_eq!(kind_of(line, &s[0], "SELECT"), Kind::Keyword);
+    assert_eq!(kind_of(line, &s[0], "count"), Kind::Function);
+    assert_eq!(kind_of(line, &s[0], "name"), Kind::Text);
+    assert_eq!(kind_of(line, &s[0], "FROM"), Kind::Keyword);
+    assert_eq!(kind_of(line, &s[0], "users"), Kind::Text);
+    assert_eq!(kind_of(line, &s[0], "10"), Kind::Number);
+    assert_eq!(kind_of(line, &s[0], "'it"), Kind::Str);
+    assert_eq!(kind_of(line, &s[0], "s'"), Kind::Str);
+    assert_eq!(kind_of(line, &s[0], "-- tail"), Kind::Comment);
+    let line =
+        "create table t (id serial primary key, body text, n numeric(10,2), when timestamptz);";
+    let s = code(&[line], FileKind::Sql);
+    assert_eq!(kind_of(line, &s[0], "create"), Kind::Keyword);
+    assert_eq!(kind_of(line, &s[0], "serial"), Kind::TypeName);
+    assert_eq!(kind_of(line, &s[0], "text"), Kind::TypeName);
+    assert_eq!(kind_of(line, &s[0], "numeric"), Kind::TypeName);
+    assert_eq!(kind_of(line, &s[0], "timestamptz"), Kind::TypeName);
+    let s = code(&["/* a", "b */ SET @x = 1;"], FileKind::Sql);
+    assert_eq!(kinds(&s[0]), vec![Kind::Comment]);
+    assert_eq!(kind_of("b */ SET @x = 1;", &s[1], "@x"), Kind::Macro);
+}
+
+#[test]
+fn fence_tags_pick_the_language() {
+    let s = hl(&[
+        "```js",
+        "const a = 1;",
+        "```",
+        "```CSS",
+        "a { color: red }",
+        "```",
+        "```sql",
+        "select 1",
+        "```",
+    ]);
+    assert_eq!(
+        kinds(&s[1]),
+        vec![
+            Kind::Keyword,
+            Kind::CodeBlock,
+            Kind::Number,
+            Kind::CodeBlock
+        ]
+    );
+    assert_eq!(kind_of("a { color: red }", &s[4], "a"), Kind::TypeName);
+    assert_eq!(kind_of("a { color: red }", &s[4], "color"), Kind::Keyword);
+    assert_eq!(kind_of("a { color: red }", &s[4], "red"), Kind::CodeBlock);
+    assert_eq!(
+        kinds(&s[7]),
+        vec![Kind::Keyword, Kind::CodeBlock, Kind::Number]
+    );
+}
+
+#[test]
+fn fence_state_resets_between_code_fences() {
+    // an unterminated JS template literal must not leak into a later fence
+    let s = hl(&[
+        "```js",
+        "const t = `open",
+        "```",
+        "```sql",
+        "select 1",
+        "```",
+    ]);
+    assert_eq!(
+        kinds(&s[4]),
+        vec![Kind::Keyword, Kind::CodeBlock, Kind::Number]
+    );
+}

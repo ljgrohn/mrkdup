@@ -1,6 +1,9 @@
-//! Pure live-syntax tokenizer for markdown, HTML, and Rust. Produces
-//! styled char-range spans per logical line; all characters stay visible
-//! (marks are dimmed, never hidden), so layout is untouched.
+//! Pure live-syntax tokenizer for markdown, HTML, and code (Rust here;
+//! JavaScript/TypeScript, CSS, and SQL in `code.rs`). Produces styled
+//! char-range spans per logical line; all characters stay visible (marks
+//! are dimmed, never hidden), so layout is untouched.
+
+mod code;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -54,16 +57,34 @@ pub enum FileKind {
     Markdown,
     Html,
     Rust,
+    JavaScript,
+    Css,
+    Sql,
 }
 
 pub fn file_kind(path: Option<&std::path::Path>) -> FileKind {
-    match path.and_then(|p| p.extension()).and_then(|e| e.to_str()) {
-        Some(e) if e.eq_ignore_ascii_case("html") || e.eq_ignore_ascii_case("htm") => {
-            FileKind::Html
-        }
-        Some(e) if e.eq_ignore_ascii_case("rs") => FileKind::Rust,
-        _ => FileKind::Markdown,
+    let ext = path
+        .and_then(|p| p.extension())
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    match ext.as_deref() {
+        Some("html" | "htm") => FileKind::Html,
+        Some(e) => fence_kind(e).unwrap_or(FileKind::Markdown),
+        None => FileKind::Markdown,
     }
+}
+
+/// The code kind a fence tag (or file extension) names, if any.
+fn fence_kind(lang: &str) -> Option<FileKind> {
+    Some(match lang {
+        "rust" | "rs" => FileKind::Rust,
+        "js" | "javascript" | "mjs" | "cjs" | "jsx" | "ts" | "typescript" | "tsx" => {
+            FileKind::JavaScript
+        }
+        "css" | "scss" => FileKind::Css,
+        "sql" => FileKind::Sql,
+        _ => return None,
+    })
 }
 
 /// Highlight a whole document (state — fences, frontmatter, comments —
@@ -81,11 +102,12 @@ pub fn highlight(lines: &[String], kind: FileKind) -> Vec<Vec<SpanTok>> {
 #[derive(Default)]
 struct State {
     in_fence: bool,
-    /// the open fence is ```rust / ```rs: highlight its body as Rust
-    fence_rust: bool,
+    /// the open fence names a code language: highlight its body as that
+    fence_code: Option<FileKind>,
     in_frontmatter: bool,
     in_comment: bool,
     rust: RustState,
+    code: code::CodeState,
 }
 
 /// Rust constructs that carry across lines.
@@ -108,8 +130,8 @@ fn highlight_line(line: &str, idx: usize, state: &mut State, kind: FileKind) -> 
     if kind == FileKind::Html {
         return html_line(&chars, state);
     }
-    if kind == FileKind::Rust {
-        return rust_line(&chars, &mut state.rust, Kind::Text);
+    if let Some(spans) = code_line(&chars, state, kind, Kind::Text) {
+        return spans;
     }
 
     // frontmatter: opened by --- on the very first line only
@@ -137,13 +159,20 @@ fn highlight_line(line: &str, idx: usize, state: &mut State, kind: FileKind) -> 
     if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
         state.in_fence = !state.in_fence;
         let lang = trimmed.trim_start_matches(['`', '~']).trim();
-        state.fence_rust = state.in_fence && matches!(lang, "rust" | "rs");
+        state.fence_code = if state.in_fence {
+            fence_kind(&lang.to_ascii_lowercase())
+        } else {
+            None
+        };
         state.rust = RustState::default();
+        state.code = code::CodeState::default();
         return vec![tok(0, n, Kind::Mark)];
     }
     if state.in_fence {
-        if state.fence_rust {
-            return rust_line(&chars, &mut state.rust, Kind::CodeBlock);
+        if let Some(kind) = state.fence_code {
+            if let Some(spans) = code_line(&chars, state, kind, Kind::CodeBlock) {
+                return spans;
+            }
         }
         return vec![tok(0, n, Kind::CodeBlock)];
     }
@@ -441,6 +470,22 @@ const RUST_PRIMITIVES: &[&str] = &[
     "bool", "char", "str", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64",
     "i128", "isize", "f32", "f64",
 ];
+
+/// One line of a code language, or `None` when `kind` isn't one.
+fn code_line(
+    chars: &[char],
+    state: &mut State,
+    kind: FileKind,
+    base: Kind,
+) -> Option<Vec<SpanTok>> {
+    Some(match kind {
+        FileKind::Rust => rust_line(chars, &mut state.rust, base),
+        FileKind::JavaScript => code::generic_line(chars, &mut state.code, base, &code::JS),
+        FileKind::Sql => code::generic_line(chars, &mut state.code, base, &code::SQL),
+        FileKind::Css => code::css_line(chars, &mut state.code, base),
+        FileKind::Markdown | FileKind::Html => return None,
+    })
+}
 
 fn is_ident_start(c: char) -> bool {
     c.is_alphabetic() || c == '_'

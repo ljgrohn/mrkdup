@@ -8,9 +8,11 @@ changes without clobbering yours.
 The editor styles markdown live as you type — headings by level,
 bold/italic, inline and fenced code, checkboxes (done items dimmed),
 blockquotes, links, YAML frontmatter — plus HTML tag/attribute/string
-coloring in `.html` files and for inline HTML in markdown, and Rust
-syntax (keywords, types, functions, strings, comments, numbers,
-macros, attributes) in `.rs` files and inside ```rust fences. Every
+coloring in `.html` files and for inline HTML in markdown, and code
+syntax — keywords, types, functions, strings, comments, numbers — for
+Rust (`.rs`), JavaScript/TypeScript (`.js`, `.mjs`, `.cjs`, `.jsx`,
+`.ts`, `.tsx`), CSS/SCSS, and SQL, both as files and inside fenced
+blocks tagged with the language. Every
 character stays visible; syntax marks are dimmed, never hidden, so the
 layout never shifts under your cursor. Tabs display as 4 spaces, not
 tab-stops.
@@ -181,10 +183,12 @@ and syntax slot mrkdup paints:
 `tab_inactive`, `text`, `mark`,
 `heading1`, `heading2`, `heading`, `bold`, `italic`, `code`,
 `checkbox`, `done`, `quote`, `link`, `bullet`, `html_tag`,
-`html_attr`, `search_match`, and for Rust code: `keyword`,
-`type_name` (also lifetimes), `string` (also char literals),
-`comment`, `number`, `macro` (`name!` calls and `#[attributes]`),
-`function` (after `fn`, or any plain name called with `(`).
+`html_attr`, `search_match`, and for code (Rust, JS/TS, CSS, SQL):
+`keyword` (also CSS properties and `!important`), `type_name` (also
+Rust lifetimes and CSS selectors), `string` (also char literals),
+`comment`, `number` (also CSS units and `#hex` colours), `macro`
+(Rust `name!` and `#[attributes]`, JS `@decorators`, CSS `@rules`, SQL
+`@variables`), `function` (a name called with `(`, or after `fn`).
 
 `name` is not settable from a theme file — it's how the theme is
 addressed, not part of it.
