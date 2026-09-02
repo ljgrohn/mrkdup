@@ -389,6 +389,14 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         Prompt::ConfirmDelete { .. } | Prompt::MoveFile { .. } => {
             format!("{mode}| j/k choose · Enter confirm · Esc cancel")
         }
+        Prompt::Settings { .. } => {
+            let mut s = format!("{mode}| h/l or ←/→ change · j/k move · Esc close");
+            if let Some(msg) = &app.status {
+                s.push_str("  —  ");
+                s.push_str(msg);
+            }
+            s
+        }
         Prompt::None => {
             let path = app
                 .editor

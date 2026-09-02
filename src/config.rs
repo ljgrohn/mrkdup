@@ -140,7 +140,6 @@ pub fn load() -> (Config, Vec<String>) {
 /// keys that merely start with `theme` (`theme_name`) don't count.
 /// Other lines are copied verbatim; the output always ends in `\n`.
 /// Pure, so the settings popup's write-back is testable without disk.
-#[allow(dead_code)] // consumed by the settings popup (next task)
 pub fn rewrite_theme_line(text: &str, name: &str) -> String {
     let mut out = String::with_capacity(text.len() + 32);
     let mut replaced = false;
@@ -165,7 +164,6 @@ pub fn rewrite_theme_line(text: &str, name: &str) -> String {
 }
 
 /// `theme` followed by optional spaces and `=`, after any indentation.
-#[allow(dead_code)] // consumed by rewrite_theme_line which may be called by settings popup
 fn is_theme_line(line: &str) -> bool {
     line.trim_start()
         .strip_prefix("theme")
@@ -177,7 +175,6 @@ fn is_theme_line(line: &str) -> bool {
 /// read it (missing = empty), rewrite the line, write atomically.
 /// Creates the parent directory if needed. Only the settings popup
 /// calls this — startup never writes the config.
-#[allow(dead_code)] // consumed by the settings popup (next task)
 pub fn save_theme_name_to(path: &Path, name: &str) -> io::Result<()> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,

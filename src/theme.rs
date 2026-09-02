@@ -502,7 +502,6 @@ pub fn parse_overlay(text: &str, theme: &mut Theme) -> Vec<String> {
 /// builtin (the loader would pick the builtin anyway), and anything
 /// that isn't a regular file. A missing or unreadable directory is
 /// simply empty. Used by the settings popup to build its choice list.
-#[allow(dead_code)]
 pub fn list_user_themes(dir: &Path) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(dir.join("themes")) else {
         return Vec::new();

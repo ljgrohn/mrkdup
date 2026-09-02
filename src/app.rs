@@ -42,6 +42,35 @@ pub enum Prompt {
         /// Index into the current filtered result list.
         selected: usize,
     },
+    /// The settings list (`s` in the tree): one row per option, `h`/`l`
+    /// cycle the selected row's value and apply it immediately.
+    Settings {
+        rows: Vec<SettingRow>,
+        selected: usize,
+    },
+}
+
+/// One row of the settings popup: a named option with a fixed list of
+/// choices and the index of the current one. `h`/`l` step it; the
+/// popup shows `name ‹ value ›`.
+pub struct SettingRow {
+    pub name: &'static str,
+    pub choices: Vec<String>,
+    pub index: usize,
+}
+
+impl SettingRow {
+    #[allow(dead_code)] // consumed by draw_popup (Task 4); tests use it today
+    pub fn value(&self) -> &str {
+        &self.choices[self.index]
+    }
+
+    /// Move `delta` choices (±1), wrapping, and return the new value.
+    pub fn step(&mut self, delta: isize) -> String {
+        let n = self.choices.len() as isize;
+        self.index = (self.index as isize + delta).rem_euclid(n) as usize;
+        self.choices[self.index].clone()
+    }
 }
 
 pub struct App {
@@ -49,6 +78,10 @@ pub struct App {
     pub editor: Editor,
     pub config: Config,
     pub theme: Theme,
+    /// `$XDG_CONFIG_HOME/mrkdup`: where the settings popup reads
+    /// `themes/` and writes `config`. `None` = no HOME; tests set it
+    /// explicitly so they never touch the real config.
+    pub config_dir: Option<PathBuf>,
     pub focus: Focus,
     pub tree_visible: bool,
     pub editor_visible: bool,
@@ -76,7 +109,9 @@ impl App {
     #[cfg(test)]
     pub fn new(root: PathBuf, config: Config) -> io::Result<App> {
         let theme = Theme::named(&config.theme_name);
-        App::new_with_theme(root, config, theme)
+        let mut app = App::new_with_theme(root, config, theme)?;
+        app.config_dir = None; // tests must never write the user's real config
+        Ok(app)
     }
 
     /// Same as `new`, but with an already-resolved `Theme` (e.g. one
@@ -87,6 +122,7 @@ impl App {
             tree: Tree::new(root)?,
             editor: Editor::new(),
             theme,
+            config_dir: crate::config::config_dir(),
             config,
             focus: Focus::Tree,
             tree_visible: true,
@@ -178,6 +214,7 @@ impl App {
             KeyCode::Char('G') => self.tree.move_bottom(),
             KeyCode::Char('.') => self.tree.toggle_hidden(),
             KeyCode::Char('?') => self.prompt = Prompt::Help,
+            KeyCode::Char('s') => self.open_settings(),
             KeyCode::Char('-') => self.tree.ascend(),
             KeyCode::Char('+') => self.tree.make_root(),
             KeyCode::Char('n') => self.prompt = Prompt::NewFile(String::new()),
@@ -264,6 +301,61 @@ impl App {
             candidates,
             selected: 0,
         };
+    }
+
+    /// Build the settings rows. The theme row lists the builtins, then
+    /// the user's `themes/` files; it starts on the configured name (or
+    /// `default` if that name isn't in the list).
+    fn open_settings(&mut self) {
+        let mut choices: Vec<String> = crate::theme::BUILTINS
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        if let Some(dir) = &self.config_dir {
+            choices.extend(crate::theme::list_user_themes(dir));
+        }
+        let index = choices
+            .iter()
+            .position(|c| *c == self.config.theme_name)
+            .unwrap_or(0);
+        self.prompt = Prompt::Settings {
+            rows: vec![SettingRow {
+                name: "theme",
+                choices,
+                index,
+            }],
+            selected: 0,
+        };
+    }
+
+    /// A settings row changed: apply the new value live and persist it.
+    /// Only `theme` exists today. The theme goes through `load_from` so
+    /// `themes/<name>` and the overlay file both apply, exactly as at
+    /// startup; the config file is rewritten in place.
+    fn apply_setting(&mut self, row: &str, value: &str) {
+        if row != "theme" {
+            return;
+        }
+        let (theme, warnings, saved) = match &self.config_dir {
+            Some(dir) => {
+                let (theme, warnings) = crate::theme::load_from(value, dir);
+                let saved = crate::config::save_theme_name_to(&dir.join("config"), value)
+                    .map_err(|e| e.to_string());
+                (theme, warnings, saved)
+            }
+            None => (
+                Theme::named(value),
+                Vec::new(),
+                Err("no config dir".to_string()),
+            ),
+        };
+        self.theme = theme;
+        self.config.theme_name = value.to_string();
+        self.status = Some(match (saved, warnings.first()) {
+            (Ok(()), None) => format!("theme: {value}"),
+            (Ok(()), Some(w)) => format!("theme: {value} — {w}"),
+            (Err(e), _) => format!("theme: {value} (not saved: {e})"),
+        });
     }
 
     fn confirm_delete(&mut self) {
@@ -616,6 +708,26 @@ impl App {
                 }
                 _ => {}
             },
+            Prompt::Settings { rows, selected } => {
+                let last = rows.len().saturating_sub(1);
+                match key.code {
+                    KeyCode::Char('j') | KeyCode::Down => *selected = (*selected + 1).min(last),
+                    KeyCode::Char('k') | KeyCode::Up => *selected = selected.saturating_sub(1),
+                    KeyCode::Char('h') | KeyCode::Left | KeyCode::Char('l') | KeyCode::Right => {
+                        let delta = if matches!(key.code, KeyCode::Char('l') | KeyCode::Right) {
+                            1
+                        } else {
+                            -1
+                        };
+                        let row = &mut rows[*selected];
+                        let name = row.name;
+                        let value = row.step(delta);
+                        self.apply_setting(name, &value);
+                    }
+                    KeyCode::Enter | KeyCode::Char('s') => self.prompt = Prompt::None,
+                    _ => {}
+                }
+            }
             Prompt::MoveFile {
                 src,
                 dests,

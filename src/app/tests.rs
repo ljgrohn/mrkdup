@@ -1003,3 +1003,104 @@ fn ctrl_q_saves_and_quits_inside_search_prompt() {
         "Qhello\nworld\n"
     );
 }
+
+#[test]
+fn s_in_tree_opens_settings_on_the_current_theme() {
+    let cfg = Config {
+        theme_name: "mono".into(),
+        ..Config::default()
+    };
+    let mut app = App::new(fixture("settings-open"), cfg).unwrap();
+    app.handle_key(key(KeyCode::Char('s')));
+    let Prompt::Settings { rows, selected } = &app.prompt else {
+        panic!("expected Settings prompt");
+    };
+    assert_eq!(*selected, 0);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].name, "theme");
+    assert_eq!(rows[0].value(), "mono");
+    assert_eq!(
+        rows[0].choices,
+        vec!["default", "light", "mono", "firmitas", "tokyonight"]
+    );
+}
+
+#[test]
+fn settings_l_and_h_cycle_the_theme_live_and_wrap() {
+    let mut app = App::new(fixture("settings-cycle"), Config::default()).unwrap();
+    assert!(
+        app.config_dir.is_none(),
+        "tests must never write the real config"
+    );
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_key(key(KeyCode::Char('l')));
+    assert_eq!(app.theme, Theme::light());
+    assert_eq!(app.config.theme_name, "light");
+    assert_eq!(
+        app.status.as_deref(),
+        Some("theme: light (not saved: no config dir)")
+    );
+
+    app.handle_key(key(KeyCode::Right));
+    assert_eq!(app.theme, Theme::mono());
+
+    // wrap backwards from index 0
+    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Left));
+    app.handle_key(key(KeyCode::Char('h')));
+    assert_eq!(app.theme.name, "tokyonight");
+    assert!(
+        matches!(app.prompt, Prompt::Settings { .. }),
+        "popup stays open while cycling"
+    );
+}
+
+#[test]
+fn settings_close_keys_and_editor_s_still_types() {
+    let root = fixture("settings-close");
+    let mut app = App::new(root, Config::default()).unwrap();
+    for close in [KeyCode::Esc, KeyCode::Enter, KeyCode::Char('s')] {
+        app.handle_key(key(KeyCode::Char('s')));
+        assert!(matches!(app.prompt, Prompt::Settings { .. }));
+        app.handle_key(key(close));
+        assert!(matches!(app.prompt, Prompt::None), "{close:?} should close");
+    }
+    // in the editor, s is a character
+    app.handle_key(key(KeyCode::Enter)); // open a.md
+    app.handle_key(key(KeyCode::Char('s')));
+    assert!(matches!(app.prompt, Prompt::None));
+    assert!(
+        app.editor.lines()[0].starts_with('s'),
+        "{:?}",
+        app.editor.lines()[0]
+    );
+}
+
+#[test]
+fn settings_persists_the_choice_and_lists_user_themes_from_config_dir() {
+    let root = fixture("settings-persist");
+    let cfg_dir = root.parent().unwrap().join("xdg");
+    std::fs::create_dir_all(cfg_dir.join("themes")).unwrap();
+    std::fs::write(cfg_dir.join("themes/forest"), "heading1 = green+bold\n").unwrap();
+    std::fs::write(cfg_dir.join("config"), "tree_width = 33\ntheme = default\n").unwrap();
+    let mut app = App::new(root, Config::default()).unwrap();
+    app.config_dir = Some(cfg_dir.clone());
+
+    app.handle_key(key(KeyCode::Char('s')));
+    let Prompt::Settings { rows, .. } = &app.prompt else {
+        panic!("expected Settings prompt");
+    };
+    assert_eq!(rows[0].choices.last().map(String::as_str), Some("forest"));
+
+    app.handle_key(key(KeyCode::Char('h'))); // wraps to the last choice: forest
+    assert_eq!(app.config.theme_name, "forest");
+    assert_eq!(app.status.as_deref(), Some("theme: forest"));
+    // the named file was applied (comparing struct fields keeps this file free of raw color literals)
+    let mut expected = Theme::default();
+    crate::theme::parse_overlay("heading1 = green+bold\n", &mut expected);
+    assert_eq!(app.theme.heading1, expected.heading1);
+    assert_eq!(
+        std::fs::read_to_string(cfg_dir.join("config")).unwrap(),
+        "tree_width = 33\ntheme = forest\n"
+    );
+}
