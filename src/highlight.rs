@@ -1,6 +1,6 @@
-//! Pure live-syntax tokenizer for markdown and HTML. Produces styled
-//! char-range spans per logical line; all characters stay visible (marks
-//! are dimmed, never hidden), so layout is untouched.
+//! Pure live-syntax tokenizer for markdown, HTML, and Rust. Produces
+//! styled char-range spans per logical line; all characters stay visible
+//! (marks are dimmed, never hidden), so layout is untouched.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -23,6 +23,16 @@ pub enum Kind {
     HtmlString,
     HtmlComment,
     FmKey,
+    // code (Rust files and ```rust fences)
+    Keyword,
+    /// a capitalised or primitive type name, or a `'lifetime`
+    TypeName,
+    /// string, raw string, byte string, or char literal
+    Str,
+    Comment,
+    Number,
+    /// a `name!` macro invocation or a `#[attribute]`
+    Macro,
 }
 
 /// `[start, end)` in CHAR indices of the line.
@@ -41,6 +51,7 @@ fn tok(start: usize, end: usize, kind: Kind) -> SpanTok {
 pub enum FileKind {
     Markdown,
     Html,
+    Rust,
 }
 
 pub fn file_kind(path: Option<&std::path::Path>) -> FileKind {
@@ -48,6 +59,7 @@ pub fn file_kind(path: Option<&std::path::Path>) -> FileKind {
         Some(e) if e.eq_ignore_ascii_case("html") || e.eq_ignore_ascii_case("htm") => {
             FileKind::Html
         }
+        Some(e) if e.eq_ignore_ascii_case("rs") => FileKind::Rust,
         _ => FileKind::Markdown,
     }
 }
@@ -67,8 +79,22 @@ pub fn highlight(lines: &[String], kind: FileKind) -> Vec<Vec<SpanTok>> {
 #[derive(Default)]
 struct State {
     in_fence: bool,
+    /// the open fence is ```rust / ```rs: highlight its body as Rust
+    fence_rust: bool,
     in_frontmatter: bool,
     in_comment: bool,
+    rust: RustState,
+}
+
+/// Rust constructs that carry across lines.
+#[derive(Default)]
+struct RustState {
+    /// nesting depth inside `/* */` (Rust block comments nest)
+    block_depth: usize,
+    /// inside a `"..."` that hasn't closed yet
+    in_string: bool,
+    /// inside a raw string, with this many `#`s after its closing quote
+    raw_hashes: Option<usize>,
 }
 
 fn highlight_line(line: &str, idx: usize, state: &mut State, kind: FileKind) -> Vec<SpanTok> {
@@ -79,6 +105,9 @@ fn highlight_line(line: &str, idx: usize, state: &mut State, kind: FileKind) -> 
     }
     if kind == FileKind::Html {
         return html_line(&chars, state);
+    }
+    if kind == FileKind::Rust {
+        return rust_line(&chars, &mut state.rust, Kind::Text);
     }
 
     // frontmatter: opened by --- on the very first line only
@@ -105,9 +134,15 @@ fn highlight_line(line: &str, idx: usize, state: &mut State, kind: FileKind) -> 
     let trimmed = line.trim_start();
     if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
         state.in_fence = !state.in_fence;
+        let lang = trimmed.trim_start_matches(['`', '~']).trim();
+        state.fence_rust = state.in_fence && matches!(lang, "rust" | "rs");
+        state.rust = RustState::default();
         return vec![tok(0, n, Kind::Mark)];
     }
     if state.in_fence {
+        if state.fence_rust {
+            return rust_line(&chars, &mut state.rust, Kind::CodeBlock);
+        }
         return vec![tok(0, n, Kind::CodeBlock)];
     }
 
@@ -389,6 +424,260 @@ fn html_line(chars: &[char], state: &mut State) -> Vec<SpanTok> {
         let next = next.max(i + 1);
         spans.push(tok(i, next, Kind::Text));
         i = next;
+    }
+    spans
+}
+
+const RUST_KEYWORDS: &[&str] = &[
+    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern",
+    "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub",
+    "ref", "return", "self", "static", "struct", "super", "trait", "true", "type", "unsafe", "use",
+    "where", "while",
+];
+
+const RUST_PRIMITIVES: &[&str] = &[
+    "bool", "char", "str", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64",
+    "i128", "isize", "f32", "f64",
+];
+
+fn is_ident_start(c: char) -> bool {
+    c.is_alphabetic() || c == '_'
+}
+
+fn is_ident_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// Append `[start, end)` as `kind`, merging into the previous span when
+/// it's the same kind (keeps the output compact and easy to assert on).
+fn push_span(spans: &mut Vec<SpanTok>, start: usize, end: usize, kind: Kind) {
+    if end <= start {
+        return;
+    }
+    match spans.last_mut() {
+        Some(last) if last.kind == kind && last.end == start => last.end = end,
+        _ => spans.push(tok(start, end, kind)),
+    }
+}
+
+/// Scan a `"` string body from `from` (just after the opening quote):
+/// the index just past the closing quote and whether it closed on this
+/// line. Backslash escapes skip the next char.
+fn scan_string(chars: &[char], from: usize) -> (usize, bool) {
+    let n = chars.len();
+    let mut j = from;
+    while j < n {
+        match chars[j] {
+            '\\' => j += 2,
+            '"' => return (j + 1, true),
+            _ => j += 1,
+        }
+    }
+    (n, false)
+}
+
+/// Scan a raw string body from `from`: the index just past `"` followed
+/// by `hashes` `#`s, or `None` if it doesn't close on this line.
+fn scan_raw(chars: &[char], from: usize, hashes: usize) -> Option<usize> {
+    let n = chars.len();
+    (from..n).find_map(|j| {
+        let closes = chars[j] == '"' && (1..=hashes).all(|k| chars.get(j + k) == Some(&'#'));
+        closes.then_some(j + 1 + hashes)
+    })
+}
+
+/// Continue a block comment from `from` (which may be just after a `/*`
+/// or the start of a line): the index where it ends, tracking nesting
+/// in `depth`. `depth` is 0 afterwards iff it closed on this line.
+fn scan_block_comment(chars: &[char], from: usize, depth: &mut usize) -> usize {
+    let n = chars.len();
+    let mut j = from;
+    while j < n && *depth > 0 {
+        if chars[j] == '/' && chars.get(j + 1) == Some(&'*') {
+            *depth += 1;
+            j += 2;
+        } else if chars[j] == '*' && chars.get(j + 1) == Some(&'/') {
+            *depth -= 1;
+            j += 2;
+        } else {
+            j += 1;
+        }
+    }
+    j.min(n)
+}
+
+/// One line of Rust. `base` is what unstyled code is painted as — `Text`
+/// in a `.rs` file, `CodeBlock` inside a markdown fence. Block comments,
+/// strings, and raw strings carry across lines via `state`.
+fn rust_line(chars: &[char], state: &mut RustState, base: Kind) -> Vec<SpanTok> {
+    let n = chars.len();
+    let mut spans = Vec::new();
+    let mut i = 0;
+    while i < n {
+        if state.block_depth > 0 {
+            let end = scan_block_comment(chars, i, &mut state.block_depth);
+            push_span(&mut spans, i, end, Kind::Comment);
+            i = end;
+            continue;
+        }
+        if let Some(h) = state.raw_hashes {
+            match scan_raw(chars, i, h) {
+                Some(end) => {
+                    push_span(&mut spans, i, end, Kind::Str);
+                    state.raw_hashes = None;
+                    i = end;
+                }
+                None => {
+                    push_span(&mut spans, i, n, Kind::Str);
+                    return spans;
+                }
+            }
+            continue;
+        }
+        if state.in_string {
+            let (end, closed) = scan_string(chars, i);
+            push_span(&mut spans, i, end, Kind::Str);
+            state.in_string = !closed;
+            i = end;
+            continue;
+        }
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        // comments
+        if c == '/' && next == Some('/') {
+            push_span(&mut spans, i, n, Kind::Comment);
+            return spans;
+        }
+        if c == '/' && next == Some('*') {
+            state.block_depth = 1;
+            let end = scan_block_comment(chars, i + 2, &mut state.block_depth);
+            push_span(&mut spans, i, end, Kind::Comment);
+            i = end;
+            continue;
+        }
+        // strings: "..", b"..", r".." / r#".."#, br".."
+        {
+            let mut q = i;
+            if chars.get(q) == Some(&'b') && matches!(chars.get(q + 1), Some('"') | Some('r')) {
+                q += 1;
+            }
+            let raw = chars.get(q) == Some(&'r');
+            let mut hashes = 0;
+            if raw {
+                q += 1;
+                while chars.get(q) == Some(&'#') {
+                    hashes += 1;
+                    q += 1;
+                }
+            }
+            if chars.get(q) == Some(&'"') && (raw || q == i || q == i + 1) {
+                if raw {
+                    match scan_raw(chars, q + 1, hashes) {
+                        Some(end) => {
+                            push_span(&mut spans, i, end, Kind::Str);
+                            i = end;
+                        }
+                        None => {
+                            push_span(&mut spans, i, n, Kind::Str);
+                            state.raw_hashes = Some(hashes);
+                            return spans;
+                        }
+                    }
+                } else {
+                    let (end, closed) = scan_string(chars, q + 1);
+                    push_span(&mut spans, i, end, Kind::Str);
+                    state.in_string = !closed;
+                    i = end;
+                }
+                continue;
+            }
+        }
+        // char literal or lifetime
+        if c == '\'' {
+            if next == Some('\\') {
+                // '\n', '\u{1F600}', ...: up to the closing quote
+                let end = find(chars, i + 2, n, '\'').map(|e| e + 1).unwrap_or(n);
+                push_span(&mut spans, i, end, Kind::Str);
+                i = end;
+                continue;
+            }
+            if chars.get(i + 2) == Some(&'\'') {
+                push_span(&mut spans, i, i + 3, Kind::Str);
+                i += 3;
+                continue;
+            }
+            if next.is_some_and(is_ident_start) {
+                let mut j = i + 1;
+                while j < n && is_ident_char(chars[j]) {
+                    j += 1;
+                }
+                push_span(&mut spans, i, j, Kind::TypeName);
+                i = j;
+                continue;
+            }
+        }
+        // #[attribute] / #![attribute]
+        if c == '#' && (next == Some('[') || (next == Some('!') && chars.get(i + 2) == Some(&'[')))
+        {
+            let mut depth = 0;
+            let mut j = i;
+            let mut end = n;
+            while j < n {
+                match chars[j] {
+                    '[' => depth += 1,
+                    ']' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = j + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                j += 1;
+            }
+            push_span(&mut spans, i, end, Kind::Macro);
+            i = end;
+            continue;
+        }
+        // numbers: 42, 1_000, 0xff, 3.14, 1e9, 2u8
+        if c.is_ascii_digit() {
+            let mut j = i + 1;
+            while j < n
+                && (is_ident_char(chars[j])
+                    || (chars[j] == '.'
+                        && chars.get(j + 1).is_some_and(|d| d.is_ascii_digit())
+                        && chars[j - 1] != '.'))
+            {
+                j += 1;
+            }
+            push_span(&mut spans, i, j, Kind::Number);
+            i = j;
+            continue;
+        }
+        // identifiers: keyword, macro!, Type / primitive, or plain
+        if is_ident_start(c) {
+            let mut j = i + 1;
+            while j < n && is_ident_char(chars[j]) {
+                j += 1;
+            }
+            let word: String = chars[i..j].iter().collect();
+            let kind = if chars.get(j) == Some(&'!') && chars.get(j + 1) != Some(&'=') {
+                j += 1;
+                Kind::Macro
+            } else if RUST_KEYWORDS.contains(&word.as_str()) {
+                Kind::Keyword
+            } else if RUST_PRIMITIVES.contains(&word.as_str()) || c.is_uppercase() {
+                Kind::TypeName
+            } else {
+                base
+            };
+            push_span(&mut spans, i, j, kind);
+            i = j;
+            continue;
+        }
+        push_span(&mut spans, i, i + 1, base);
+        i += 1;
     }
     spans
 }

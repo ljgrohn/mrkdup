@@ -109,7 +109,7 @@ fn dashes_on_first_line_open_frontmatter() {
 
 #[test]
 fn fenced_code_block() {
-    let s = hl(&["```rust", "let x = 1;", "```", "after"]);
+    let s = hl(&["```python", "let x = 1;", "```", "after"]);
     assert_eq!(kinds(&s[0]), vec![Kind::Mark]);
     assert_eq!(kinds(&s[1]), vec![Kind::CodeBlock]);
     assert_eq!(kinds(&s[2]), vec![Kind::Mark]);
@@ -202,4 +202,194 @@ fn unicode_char_indices() {
     // spans are char-indexed: emoji/wide chars must not break coverage
     let s = hl(&["héllo **wörld** 你好"]);
     assert_covers(&s[0], "héllo **wörld** 你好".chars().count());
+}
+
+// ---- rust -------------------------------------------------------------
+
+fn rs(lines: &[&str]) -> Vec<Vec<SpanTok>> {
+    let v: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+    highlight(&v, FileKind::Rust)
+}
+
+/// The kind painted over the first occurrence of `needle` in `line`.
+fn kind_of(line: &str, spans: &[SpanTok], needle: &str) -> Kind {
+    let at = line.find(needle).expect("needle present");
+    let at = line[..at].chars().count();
+    spans
+        .iter()
+        .find(|s| at >= s.start && at < s.end)
+        .map(|s| s.kind)
+        .expect("covered")
+}
+
+/// `(kind, text)` per span, for readable assertions.
+fn pieces(line: &str, spans: &[SpanTok]) -> Vec<(Kind, String)> {
+    let chars: Vec<char> = line.chars().collect();
+    spans
+        .iter()
+        .map(|s| (s.kind, chars[s.start..s.end].iter().collect()))
+        .collect()
+}
+
+#[test]
+fn rs_extension_is_rust() {
+    assert_eq!(
+        file_kind(Some(std::path::Path::new("src/main.rs"))),
+        FileKind::Rust
+    );
+    assert_eq!(
+        file_kind(Some(std::path::Path::new("notes.md"))),
+        FileKind::Markdown
+    );
+}
+
+#[test]
+fn rust_keywords_types_and_macros() {
+    let line = "pub fn main() -> Option<u8> { println!(\"hi\"); }";
+    let s = rs(&[line]);
+    assert_covers(&s[0], line.chars().count());
+    let p = pieces(line, &s[0]);
+    assert!(p.contains(&(Kind::Keyword, "pub".into())));
+    assert!(p.contains(&(Kind::Keyword, "fn".into())));
+    assert_eq!(kind_of(line, &s[0], "main"), Kind::Text);
+    assert!(p.contains(&(Kind::TypeName, "Option".into())));
+    assert!(p.contains(&(Kind::TypeName, "u8".into())));
+    assert!(p.contains(&(Kind::Macro, "println!".into())));
+    assert!(p.contains(&(Kind::Str, "\"hi\"".into())));
+}
+
+#[test]
+fn rust_not_equal_is_not_a_macro() {
+    let line = "if a != b {}";
+    let s = rs(&[line]);
+    assert_eq!(kind_of(line, &s[0], "a"), Kind::Text);
+    assert!(!s[0].iter().any(|t| t.kind == Kind::Macro));
+}
+
+#[test]
+fn rust_line_comment_runs_to_the_end() {
+    let line = "let x = 1; // one \"not a string\"";
+    let p = pieces(line, &rs(&[line])[0]);
+    assert_eq!(
+        p.last().unwrap(),
+        &(Kind::Comment, "// one \"not a string\"".into())
+    );
+    assert!(p.contains(&(Kind::Number, "1".into())));
+}
+
+#[test]
+fn rust_block_comments_nest_and_span_lines() {
+    let s = rs(&["a /* one /* two */", "still */ b"]);
+    assert_eq!(kinds(&s[0]), vec![Kind::Text, Kind::Comment]);
+    assert_eq!(
+        pieces("still */ b", &s[1])[0],
+        (Kind::Comment, "still */".into())
+    );
+    assert_eq!(kinds(&s[1]), vec![Kind::Comment, Kind::Text]);
+}
+
+#[test]
+fn rust_strings_escape_and_span_lines() {
+    let line = "let s = \"a \\\" b\"; x";
+    let p = pieces(line, &rs(&[line])[0]);
+    assert!(p.contains(&(Kind::Str, "\"a \\\" b\"".into())));
+    let s = rs(&["let s = \"open", "close\"; y"]);
+    assert_eq!(kinds(&s[0]), vec![Kind::Keyword, Kind::Text, Kind::Str]);
+    assert_eq!(
+        pieces("close\"; y", &s[1])[0],
+        (Kind::Str, "close\"".into())
+    );
+}
+
+#[test]
+fn rust_raw_and_byte_strings() {
+    let line = "r#\"a \" b\"# b\"x\" br\"y\"";
+    let p = pieces(line, &rs(&[line])[0]);
+    assert!(p.contains(&(Kind::Str, "r#\"a \" b\"#".into())));
+    assert!(p.contains(&(Kind::Str, "b\"x\"".into())));
+    assert!(p.contains(&(Kind::Str, "br\"y\"".into())));
+    // a raw string carries across lines until its matching "#
+    let s = rs(&["r##\"one", "two\"# not yet", "three\"## done"]);
+    assert_eq!(kinds(&s[1]), vec![Kind::Str]);
+    assert_eq!(kinds(&s[2]), vec![Kind::Str, Kind::Text]);
+}
+
+#[test]
+fn rust_char_literals_versus_lifetimes() {
+    let line = "fn f<'a>(x: &'a str) -> char { '\\n' } // 'x'";
+    let p = pieces(line, &rs(&[line])[0]);
+    assert!(p.contains(&(Kind::TypeName, "'a".into())), "{p:?}");
+    assert!(p.contains(&(Kind::Str, "'\\n'".into())), "{p:?}");
+    let line = "let c = 'x';";
+    let p = pieces(line, &rs(&[line])[0]);
+    assert!(p.contains(&(Kind::Str, "'x'".into())));
+}
+
+#[test]
+fn rust_attributes_and_numbers() {
+    let line = "#[derive(Debug, Clone)] const N: usize = 0xff + 1_000 + 3.14 + 2u8;";
+    let p = pieces(line, &rs(&[line])[0]);
+    assert_eq!(p[0], (Kind::Macro, "#[derive(Debug, Clone)]".into()));
+    for num in ["0xff", "1_000", "3.14", "2u8"] {
+        assert!(p.contains(&(Kind::Number, num.into())), "{num}: {p:?}");
+    }
+    let line = "#![allow(dead_code)]";
+    assert_eq!(kinds(&rs(&[line])[0]), vec![Kind::Macro]);
+}
+
+#[test]
+fn rust_range_is_not_a_float() {
+    let line = "for i in 0..10 {}";
+    let p = pieces(line, &rs(&[line])[0]);
+    assert!(p.contains(&(Kind::Number, "0".into())));
+    assert!(p.contains(&(Kind::Number, "10".into())));
+    assert!(p.contains(&(Kind::Text, "..".into())));
+}
+
+#[test]
+fn rust_fence_in_markdown_gets_rust_styling_on_a_code_base() {
+    let s = hl(&["```rust", "let x = \"s\"; // c", "```", "let y"]);
+    assert_eq!(kinds(&s[0]), vec![Kind::Mark]);
+    assert_eq!(
+        kinds(&s[1]),
+        vec![
+            Kind::Keyword,
+            Kind::CodeBlock,
+            Kind::Str,
+            Kind::CodeBlock,
+            Kind::Comment
+        ]
+    );
+    assert_eq!(kinds(&s[2]), vec![Kind::Mark]);
+    assert_eq!(kinds(&s[3]), vec![Kind::Text]); // back to markdown
+                                                // other fences stay flat code
+    let s = hl(&["```python", "let x = 1", "```"]);
+    assert_eq!(kinds(&s[1]), vec![Kind::CodeBlock]);
+}
+
+#[test]
+fn rust_fence_state_resets_at_the_closing_fence() {
+    let s = hl(&["```rs", "/* open", "```", "plain"]);
+    assert_eq!(kinds(&s[1]), vec![Kind::Comment]);
+    assert_eq!(kinds(&s[2]), vec![Kind::Mark]);
+    assert_eq!(kinds(&s[3]), vec![Kind::Text]);
+}
+
+#[test]
+fn rust_every_line_is_fully_covered() {
+    let src = [
+        "use std::io;",
+        "",
+        "/// doc",
+        "#[derive(Default)]",
+        "struct S<'a> { name: &'a str, n: u32 }",
+        "impl<'a> S<'a> {",
+        "    fn go(&self) -> Result<(), io::Error> { Ok(()) }",
+        "}",
+    ];
+    let s = rs(&src);
+    for (line, spans) in src.iter().zip(&s) {
+        assert_covers(spans, line.chars().count());
+    }
+    assert_eq!(kinds(&s[2]), vec![Kind::Comment]);
 }

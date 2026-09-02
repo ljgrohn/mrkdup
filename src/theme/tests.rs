@@ -29,6 +29,13 @@ fn legacy_style(kind: Kind) -> Style {
         Kind::Bullet => Style::default().fg(Color::Cyan),
         Kind::HtmlTag => Style::default().fg(Color::Magenta),
         Kind::HtmlAttr | Kind::FmKey => Style::default().fg(Color::Cyan),
+        // code kinds postdate the legacy table; these are their defaults
+        Kind::Keyword => Style::default().fg(Color::Magenta),
+        Kind::TypeName => Style::default().fg(Color::Yellow),
+        Kind::Str => Style::default().fg(Color::Green),
+        Kind::Comment => Style::default().add_modifier(Modifier::DIM),
+        Kind::Number => Style::default().fg(Color::Cyan),
+        Kind::Macro => Style::default().fg(Color::Blue),
     }
 }
 
@@ -56,6 +63,12 @@ const ALL_KINDS: &[Kind] = &[
     Kind::HtmlString,
     Kind::HtmlComment,
     Kind::FmKey,
+    Kind::Keyword,
+    Kind::TypeName,
+    Kind::Str,
+    Kind::Comment,
+    Kind::Number,
+    Kind::Macro,
 ];
 
 #[test]
@@ -135,6 +148,12 @@ fn mono_theme_has_no_color_anywhere() {
         theme.html_tag,
         theme.html_attr,
         theme.search_match,
+        theme.keyword,
+        theme.type_name,
+        theme.string,
+        theme.comment,
+        theme.number,
+        theme.macro_call,
     ];
     for style in styles {
         assert_eq!(

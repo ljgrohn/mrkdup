@@ -45,6 +45,13 @@ pub struct Theme {
     pub html_tag: Style,
     pub html_attr: Style,    // also FmKey
     pub search_match: Style, // overlay; default = Black on Yellow
+    // code (Rust files and ```rust fences)
+    pub keyword: Style,
+    pub type_name: Style, // also lifetimes
+    pub string: Style,    // also char literals
+    pub comment: Style,
+    pub number: Style,
+    pub macro_call: Style, // `name!` and `#[attributes]`
 }
 
 /// The shipped palettes, in the order the settings popup lists them.
@@ -94,6 +101,12 @@ impl Default for Theme {
             html_tag: Style::default().fg(Color::Magenta),
             html_attr: Style::default().fg(Color::Cyan),
             search_match: Style::default().fg(Color::Black).bg(Color::Yellow),
+            keyword: Style::default().fg(Color::Magenta),
+            type_name: Style::default().fg(Color::Yellow),
+            string: Style::default().fg(Color::Green),
+            comment: Style::default().add_modifier(Modifier::DIM),
+            number: Style::default().fg(Color::Cyan),
+            macro_call: Style::default().fg(Color::Blue),
         }
     }
 }
@@ -134,6 +147,12 @@ impl Theme {
             html_tag: Style::default().fg(Color::Magenta),
             html_attr: Style::default().fg(Color::Blue),
             search_match: Style::default().fg(Color::Black).bg(Color::Yellow),
+            keyword: Style::default().fg(Color::Magenta),
+            type_name: Style::default().fg(Color::Blue),
+            string: Style::default().fg(Color::Green),
+            comment: Style::default().add_modifier(Modifier::DIM),
+            number: Style::default().fg(Color::Red),
+            macro_call: Style::default().fg(Color::Blue),
         }
     }
 
@@ -171,6 +190,12 @@ impl Theme {
             html_tag: Style::default(),
             html_attr: Style::default(),
             search_match: reversed,
+            keyword: bold,
+            type_name: Style::default(),
+            string: dim,
+            comment: dim,
+            number: Style::default(),
+            macro_call: Style::default(),
         }
     }
 
@@ -219,6 +244,12 @@ impl Theme {
             html_tag: Style::default().fg(gilded),
             html_attr: Style::default().fg(sandstone),
             search_match: Style::default().fg(navy).bg(gilded),
+            keyword: Style::default().fg(gold),
+            type_name: Style::default().fg(travertine),
+            string: Style::default().fg(sandstone),
+            comment: Style::default().fg(muted),
+            number: Style::default().fg(gilded),
+            macro_call: Style::default().fg(bronze),
         }
     }
 
@@ -235,6 +266,7 @@ impl Theme {
         let green = rgb(0x9ece6a);
         let magenta = rgb(0xbb9af7);
         let yellow = rgb(0xe0af68);
+        let orange = rgb(0xff9e64);
         Theme {
             name: "tokyonight".to_string(),
             border_focused: Style::default().fg(blue),
@@ -263,6 +295,12 @@ impl Theme {
             html_tag: Style::default().fg(magenta),
             html_attr: Style::default().fg(cyan),
             search_match: Style::default().fg(bg).bg(yellow),
+            keyword: Style::default().fg(magenta),
+            type_name: Style::default().fg(cyan),
+            string: Style::default().fg(green),
+            comment: Style::default().fg(comment),
+            number: Style::default().fg(orange),
+            macro_call: Style::default().fg(blue),
         }
     }
 
@@ -296,6 +334,12 @@ impl Theme {
             Kind::Bullet => self.bullet,
             Kind::HtmlTag => self.html_tag,
             Kind::HtmlAttr | Kind::FmKey => self.html_attr,
+            Kind::Keyword => self.keyword,
+            Kind::TypeName => self.type_name,
+            Kind::Str => self.string,
+            Kind::Comment => self.comment,
+            Kind::Number => self.number,
+            Kind::Macro => self.macro_call,
         }
     }
 }
@@ -501,6 +545,12 @@ pub fn parse_overlay(text: &str, theme: &mut Theme) -> Vec<String> {
             "html_tag" => &mut theme.html_tag,
             "html_attr" => &mut theme.html_attr,
             "search_match" => &mut theme.search_match,
+            "keyword" => &mut theme.keyword,
+            "type_name" => &mut theme.type_name,
+            "string" => &mut theme.string,
+            "comment" => &mut theme.comment,
+            "number" => &mut theme.number,
+            "macro" => &mut theme.macro_call,
             _ => {
                 warnings.push(format!("line {n}: unknown option: {key}"));
                 continue;
