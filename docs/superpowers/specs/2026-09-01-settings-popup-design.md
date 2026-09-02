@@ -127,6 +127,10 @@ pub fn rewrite_theme_line(text: &str, name: &str) -> String;
 pub fn save_theme_name_to(path: &Path, name: &str) -> io::Result<()>;
 ```
 
+Renamed to `rewrite_key_line(text, key, value)` / `save_key_to(path, key,
+value)` by the side_padding addendum below; behaviour unchanged, `key`
+is what used to be the literal `theme`.
+
 Rules for `rewrite_theme_line`:
 
 - Match a line whose trimmed form starts with `theme` followed by
@@ -297,8 +301,8 @@ an mrkdup key over terminal-emulator padding.
 ## Not doing
 
 - No editing overlay slots from the UI.
-- No numeric settings rows yet (the row struct allows them; nothing
-  more).
+- No settings rows beyond `theme` and `side_padding`.
 - No theme preview swatches; the live repaint is the preview.
 - No Ctrl+key global binding for the popup; tree-pane `s` only.
-- No writing any key other than `theme`.
+- The writer only touches the one `key = value` line it's asked to; no
+  other keys are rewritten.

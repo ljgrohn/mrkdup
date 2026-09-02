@@ -304,3 +304,63 @@ fn side_padding_insets_the_panes_from_the_terminal_edges() {
     assert_eq!(buf[(0, 0)].symbol(), " ");
     assert_ne!(buf[(1, 0)].symbol(), " ");
 }
+
+// Regression test for the popup row layout in `draw_popup` (Settings
+// block, src/ui.rs): row width there is computed with `.chars().count()`
+// so a multi-row popup's `‹ value ›` sits flush against the right
+// border. `‹`/`›` are each 3 UTF-8 bytes but 1 char, so swapping in
+// `.len()` (byte count) overcounts the value's width by 4 and shorts the
+// gap by 4 columns, leaving the value floating away from the border —
+// confirmed by temporarily reverting the three `.chars().count()` calls
+// to `.len()` (see commit body for both runs' output). Reconstructing
+// each row as a string (rather than asserting on individual `Buffer`
+// cells by hand) is the robust option here: it survives incidental
+// width/height changes to the popup and reads like the on-screen text.
+#[test]
+fn settings_popup_second_row_and_value_align_to_border() {
+    let root = fixture("settings-rows", "# Title\n");
+    let mut app = App::new(root, Config::default()).unwrap();
+    app.handle_key(key(KeyCode::Char('s')));
+    let buf = draw_buffer(&mut app);
+
+    let width = buf.area.width;
+    let height = buf.area.height;
+    let rows: Vec<String> = (0..height)
+        .map(|y| {
+            (0..width)
+                .map(|x| buf[(x, y)].symbol().to_string())
+                .collect::<String>()
+        })
+        .collect();
+
+    let theme_row = rows
+        .iter()
+        .find(|r| r.contains("theme"))
+        .unwrap_or_else(|| panic!("no row with 'theme' found in popup: {rows:?}"));
+    let theme_row_chars: Vec<char> = theme_row.chars().collect();
+    let value_end = theme_row_chars
+        .iter()
+        .position(|&c| c == '›')
+        .unwrap_or_else(|| panic!("no '›' found in theme row: {theme_row}"));
+    // Row text is " theme<gap>‹ default › " followed immediately by the
+    // popup's right border: `›`, one space, then `│`.
+    let border = theme_row_chars.get(value_end + 2).copied();
+    assert_eq!(
+        border,
+        Some('│'),
+        "value not flush against right border two columns after '›': {theme_row}"
+    );
+    assert!(
+        theme_row.contains("‹ default › │"),
+        "theme row's value is not flush against the popup border: {theme_row}"
+    );
+
+    let side_padding_row = rows
+        .iter()
+        .find(|r| r.contains("side_padding"))
+        .unwrap_or_else(|| panic!("no row with 'side_padding' found in popup: {rows:?}"));
+    assert!(
+        side_padding_row.contains("‹ 1 ›"),
+        "second row missing its default value: {side_padding_row}"
+    );
+}
