@@ -88,7 +88,8 @@ clamped into the ranges below.
 tree_width = 30
 side_margin_percent = 5
 autosave_seconds = 10
-theme = default    # default | light | mono
+# default | light | mono | firmitas | tokyonight
+theme = default
 ```
 
 | Option | Default | Range | Meaning |

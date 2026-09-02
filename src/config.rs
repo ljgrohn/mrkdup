@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// User configuration, read from `$XDG_CONFIG_HOME/mrkdup/config`
@@ -130,6 +131,63 @@ pub fn load() -> (Config, Vec<String>) {
         Some(Ok(text)) => parse(&text),
         _ => (Config::default(), Vec::new()),
     }
+}
+
+/// `text` with the first `theme = …` line replaced by `theme = <name>`
+/// (leading indentation kept; the parser has no inline comments, so the
+/// whole rest of the line is the value), or with `theme = <name>`
+/// appended when no such line exists. Commented-out lines and other
+/// keys that merely start with `theme` (`theme_name`) don't count.
+/// Other lines are copied verbatim; the output always ends in `\n`.
+/// Pure, so the settings popup's write-back is testable without disk.
+#[allow(dead_code)] // consumed by the settings popup (next task)
+pub fn rewrite_theme_line(text: &str, name: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 32);
+    let mut replaced = false;
+    for line in text.lines() {
+        if !replaced && is_theme_line(line) {
+            let indent = &line[..line.len() - line.trim_start().len()];
+            out.push_str(indent);
+            out.push_str("theme = ");
+            out.push_str(name);
+            replaced = true;
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    if !replaced {
+        out.push_str("theme = ");
+        out.push_str(name);
+        out.push('\n');
+    }
+    out
+}
+
+/// `theme` followed by optional spaces and `=`, after any indentation.
+#[allow(dead_code)] // consumed by rewrite_theme_line which may be called by settings popup
+fn is_theme_line(line: &str) -> bool {
+    line.trim_start()
+        .strip_prefix("theme")
+        .map(|rest| rest.trim_start().starts_with('='))
+        .unwrap_or(false)
+}
+
+/// Persist `name` as the `theme` key of the config file at `path`:
+/// read it (missing = empty), rewrite the line, write atomically.
+/// Creates the parent directory if needed. Only the settings popup
+/// calls this — startup never writes the config.
+#[allow(dead_code)] // consumed by the settings popup (next task)
+pub fn save_theme_name_to(path: &Path, name: &str) -> io::Result<()> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e),
+    };
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    crate::fsutil::atomic_write(path, rewrite_theme_line(&text, name).as_bytes())
 }
 
 #[cfg(test)]

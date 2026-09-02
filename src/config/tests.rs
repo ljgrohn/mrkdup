@@ -152,3 +152,73 @@ fn load_reads_xdg_config_home_and_defaults_when_absent() {
     assert_eq!(warnings.len(), 1);
     std::env::remove_var("XDG_CONFIG_HOME");
 }
+
+#[test]
+fn rewrite_theme_line_replaces_in_place_and_keeps_everything_else() {
+    let text = "# my config\ntree_width = 40\n  theme = light\nautosave_seconds = 5\n";
+    assert_eq!(
+        rewrite_theme_line(text, "mono"),
+        "# my config\ntree_width = 40\n  theme = mono\nautosave_seconds = 5\n"
+    );
+}
+
+#[test]
+fn rewrite_theme_line_ignores_commented_out_and_lookalike_keys() {
+    let text = "# theme = light\ntheme_name = x\nthemes = y\n";
+    assert_eq!(
+        rewrite_theme_line(text, "mono"),
+        "# theme = light\ntheme_name = x\nthemes = y\ntheme = mono\n"
+    );
+}
+
+#[test]
+fn rewrite_theme_line_only_rewrites_the_first_duplicate() {
+    let text = "theme=light\ntheme = mono\n";
+    assert_eq!(
+        rewrite_theme_line(text, "firmitas"),
+        "theme = firmitas\ntheme = mono\n"
+    );
+}
+
+#[test]
+fn rewrite_theme_line_appends_with_and_without_trailing_newline() {
+    assert_eq!(
+        rewrite_theme_line("tree_width = 40\n", "light"),
+        "tree_width = 40\ntheme = light\n"
+    );
+    assert_eq!(
+        rewrite_theme_line("tree_width = 40", "light"),
+        "tree_width = 40\ntheme = light\n"
+    );
+    assert_eq!(rewrite_theme_line("", "light"), "theme = light\n");
+}
+
+#[test]
+fn rewrite_theme_line_output_reparses_to_the_new_name() {
+    let out = rewrite_theme_line("tree_width = 40\ntheme = light\n", "tokyonight");
+    let (cfg, warnings) = parse(&out);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(cfg.theme_name, "tokyonight");
+    assert_eq!(cfg.tree_width, 40);
+}
+
+#[test]
+fn save_theme_name_to_creates_the_file_and_preserves_other_keys() {
+    let dir = std::env::temp_dir().join("mrkdup-config-save");
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("mrkdup").join("config");
+
+    // missing dir + file: created with just the theme line
+    save_theme_name_to(&path, "mono").unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "theme = mono\n");
+
+    // existing file: other keys and comments survive, theme rewritten
+    std::fs::write(&path, "# keep me\ntree_width = 42\ntheme = mono\n").unwrap();
+    save_theme_name_to(&path, "light").unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(text, "# keep me\ntree_width = 42\ntheme = light\n");
+    let (cfg, warnings) = parse(&text);
+    assert!(warnings.is_empty());
+    assert_eq!(cfg.tree_width, 42);
+    assert_eq!(cfg.theme_name, "light");
+}
