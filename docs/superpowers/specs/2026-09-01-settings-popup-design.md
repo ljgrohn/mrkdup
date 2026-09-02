@@ -115,8 +115,9 @@ The next frame repaints in the new theme. Nothing else is invalidated.
 `config.rs` gains:
 
 ```rust
-/// Pure: return `text` with the first `theme = …` line replaced (the
-/// value only — comments after `#` on that line are kept), or with
+/// Pure: return `text` with the first `theme = …` line replaced by
+/// `theme = <name>` (leading indentation kept; the parser has no inline
+/// comments, so the whole remainder of the line is the value), or with
 /// `theme = <name>` appended if no such line exists. Never touches
 /// other lines.
 pub fn rewrite_theme_line(text: &str, name: &str) -> String;
@@ -131,9 +132,13 @@ Rules for `rewrite_theme_line`:
 - Match a line whose trimmed form starts with `theme` followed by
   optional spaces and `=`; only the first match is rewritten, later
   duplicates are left alone (the parser also honours the first).
-- Preserve the line's leading indentation and any trailing `# comment`
-  (split the value at the first `#`, keep from there).
-- Commented-out lines (`# theme = light`) do not match.
+- Preserve the line's leading indentation. The whole rest of the line
+  is replaced (the parser does not support inline comments, so there is
+  nothing after the value to keep). The README's config sample, which
+  wrongly shows an inline comment on the `theme` line, moves that
+  comment to its own line.
+- Commented-out lines (`# theme = light`) and other keys that merely
+  start with `theme` (`theme_name = x`) do not match.
 - Appending: if `text` is non-empty and doesn't end in `\n`, add one
   before the new line. Output always ends in `\n`.
 - `name` is already validated (it came from the choice list); the
@@ -239,15 +244,16 @@ README config table and Themes section list all five names.
 | `themes/` missing or unreadable | treated as empty |
 | a `themes/` entry with an invalid name | skipped silently |
 | `themes/<name>` fails to parse in part | loader warnings → status line (first warning), theme applied with the valid lines |
-| config file unreadable | treated as empty text → written with just `theme = <name>` |
+| config file missing | treated as empty text → written with just `theme = <name>` |
+| config file exists but unreadable | not written (never clobber a file we couldn't read); status shows the io error; theme still applies |
 | write fails | status shows the io error; in-memory theme and `config.theme_name` already updated |
 
 ## Testing
 
-- `config::rewrite_theme_line` table: replace-in-place keeps comment
-  and indentation; commented-out line not matched; first of two
-  duplicates rewritten; append with and without trailing newline;
-  empty text.
+- `config::rewrite_theme_line` table: replace-in-place keeps
+  indentation and other lines; commented-out line not matched;
+  `theme_name = x` not matched; first of two duplicates rewritten;
+  append with and without trailing newline; empty text.
 - `config::save_theme_name` round-trip through a temp dir: needs a
   `save_theme_name_to(path, name)` inner fn taking the file path so the
   test never sets `XDG_CONFIG_HOME`.
