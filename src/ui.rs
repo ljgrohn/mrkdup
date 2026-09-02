@@ -22,6 +22,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     app.editor_area = None;
     app.tree_area = None;
     app.tab_bar = None;
+    app.settings_hits = None;
 
     if app.tree_visible && app.editor_visible {
         let [tree_area, editor_area] = Layout::horizontal([
@@ -75,7 +76,7 @@ fn draw_input_popup(f: &mut Frame, area: Rect, title: &str, input: &str, theme: 
     f.render_widget(Paragraph::new(line), inner);
 }
 
-fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
+fn draw_popup(f: &mut Frame, app: &mut App, area: Rect) {
     let theme = &app.theme;
     if let Prompt::Help = &app.prompt {
         let lines = key_lines();
@@ -235,6 +236,7 @@ fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
         let block = popup_block(" Settings ", theme);
         let inner = block.inner(popup);
         f.render_widget(block, popup);
+        let mut hits = Vec::new();
         let lines: Vec<Line> = rows
             .iter()
             .enumerate()
@@ -245,6 +247,12 @@ fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
                 let gap = (inner.width as usize)
                     .saturating_sub(r.name.chars().count() + value.chars().count() + 2)
                     .max(1);
+                let prev_x = inner.x + (1 + r.name.chars().count() + gap) as u16;
+                hits.push(crate::app::SettingsRowHit {
+                    y: inner.y + i as u16,
+                    prev_x,
+                    next_x: prev_x + value.chars().count() as u16 - 1,
+                });
                 let mut line = Line::from(format!(" {}{}{} ", r.name, " ".repeat(gap), value));
                 if i == *selected {
                     line = line.style(Style::default().add_modifier(Modifier::REVERSED));
@@ -253,6 +261,7 @@ fn draw_popup(f: &mut Frame, app: &App, area: Rect) {
             })
             .collect();
         f.render_widget(Paragraph::new(lines), inner);
+        app.settings_hits = Some(crate::app::SettingsHits { popup, rows: hits });
     }
 }
 

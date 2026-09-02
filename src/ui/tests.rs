@@ -430,3 +430,35 @@ fn settings_popup_is_sized_by_the_widest_choice_and_capped_to_the_pane() {
     // narrower than the 40 minimum
     assert!((40..=44).contains(&popup_w), "{popup_line:?}");
 }
+
+#[test]
+fn draw_records_settings_popup_hits_with_arrows_on_the_glyphs() {
+    let root = std::env::temp_dir().join("mrkdup-ui-settings-hits");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let mut app = App::new(root, Config::default()).unwrap();
+    app.handle_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('s'),
+        crossterm::event::KeyModifiers::NONE,
+    ));
+    let backend = TestBackend::new(70, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buf = terminal.backend().buffer();
+    let hits = app.settings_hits.clone().expect("recorded");
+    assert_eq!(hits.rows.len(), 2);
+    for (i, row) in hits.rows.iter().enumerate() {
+        assert_eq!(row.y, hits.popup.y + 1 + i as u16);
+        assert_eq!(buf.cell((row.prev_x, row.y)).unwrap().symbol(), "‹");
+        assert_eq!(buf.cell((row.next_x, row.y)).unwrap().symbol(), "›");
+        // › sits one cell left of the right border
+        assert_eq!(row.next_x, hits.popup.x + hits.popup.width - 3);
+    }
+    // closing the popup drops the geometry on the next frame
+    app.handle_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Esc,
+        crossterm::event::KeyModifiers::NONE,
+    ));
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    assert!(app.settings_hits.is_none());
+}

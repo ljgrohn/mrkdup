@@ -52,6 +52,22 @@ pub enum Prompt {
     },
 }
 
+/// Where the settings popup was drawn last frame, for mouse clicks:
+/// the popup rect and, per row, its screen row and the x cells of its
+/// `‹` and `›`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingsHits {
+    pub popup: Rect,
+    pub rows: Vec<SettingsRowHit>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SettingsRowHit {
+    pub y: u16,
+    pub prev_x: u16,
+    pub next_x: u16,
+}
+
 /// One row of the settings popup: a named option with a fixed list of
 /// choices and the index of the current one. `h`/`l` step it; the
 /// popup shows `name ‹ value ›`.
@@ -104,6 +120,9 @@ pub struct App {
     /// The tab bar as of the last frame: its rect and the painted
     /// segments (x-relative to the rect), for click-to-switch/close.
     pub tab_bar: Option<(Rect, Vec<Segment>)>,
+    /// The settings popup's geometry as of the last frame (`None` when
+    /// it isn't open).
+    pub settings_hits: Option<SettingsHits>,
     /// Text a mouse selection wants on the system clipboard; `main.rs`
     /// drains it into an OSC 52 write after each event.
     pub clipboard: Option<String>,
@@ -154,6 +173,7 @@ impl App {
             editor_area: None,
             tree_area: None,
             tab_bar: None,
+            settings_hits: None,
             clipboard: None,
             dragging: false,
             pending_quit: false,
@@ -285,10 +305,16 @@ impl App {
     /// wanders over the tree keeps selecting editor text. Ignored while
     /// a prompt is open.
     pub fn handle_mouse(&mut self, m: MouseEvent) {
+        let (x, y) = (m.column, m.row);
+        if matches!(self.prompt, Prompt::Settings { .. }) {
+            if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) {
+                self.settings_click(x, y);
+            }
+            return;
+        }
         if !matches!(self.prompt, Prompt::None) {
             return;
         }
-        let (x, y) = (m.column, m.row);
         match m.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.status = None;
@@ -362,6 +388,42 @@ impl App {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// A click while the settings popup is open: outside it closes the
+    /// popup; on a row selects that row; on the row's `‹` / `›` also
+    /// steps its value, exactly like h / l.
+    fn settings_click(&mut self, x: u16, y: u16) {
+        let Some(hits) = self.settings_hits.clone() else {
+            return;
+        };
+        if !contains(hits.popup, x, y) {
+            self.prompt = Prompt::None;
+            return;
+        }
+        let Some((i, hit)) = hits.rows.iter().enumerate().find(|(_, r)| r.y == y) else {
+            return;
+        };
+        let delta = if x == hit.prev_x {
+            -1
+        } else if x == hit.next_x {
+            1
+        } else {
+            0
+        };
+        let Prompt::Settings { rows, selected } = &mut self.prompt else {
+            return;
+        };
+        if i >= rows.len() {
+            return;
+        }
+        *selected = i;
+        if delta != 0 {
+            let row = &mut rows[i];
+            let name = row.name;
+            let value = row.step(delta);
+            self.apply_setting(name, &value);
         }
     }
 

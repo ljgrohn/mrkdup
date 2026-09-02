@@ -1645,3 +1645,73 @@ fn search_highlight_is_per_tab() {
     assert_eq!(app.tabs[1].search_highlight.as_deref(), Some("e"));
     assert!(app.tabs[0].search_highlight.is_none());
 }
+
+// ---- settings popup mouse -------------------------------------------
+
+/// The settings popup open, with the geometry a draw would record:
+/// popup at (10,3) 40x4, rows on y 4 and 5, ‹ at x 30, › at x 47.
+fn settings_mouse_app(tag: &str) -> App {
+    let mut app = App::new(fixture(tag), Config::default()).unwrap();
+    app.handle_key(key(KeyCode::Char('s')));
+    app.settings_hits = Some(SettingsHits {
+        popup: Rect::new(10, 3, 40, 4),
+        rows: vec![
+            SettingsRowHit {
+                y: 4,
+                prev_x: 30,
+                next_x: 47,
+            },
+            SettingsRowHit {
+                y: 5,
+                prev_x: 30,
+                next_x: 47,
+            },
+        ],
+    });
+    app
+}
+
+#[test]
+fn clicking_a_settings_row_selects_it() {
+    let mut app = settings_mouse_app("settings-click-row");
+    app.handle_mouse(down(15, 5));
+    match &app.prompt {
+        Prompt::Settings { selected, .. } => assert_eq!(*selected, 1),
+        _ => panic!("popup closed"),
+    }
+    // the theme is untouched by a plain row click
+    assert_eq!(app.config.theme_name, "default");
+}
+
+#[test]
+fn clicking_the_arrows_steps_the_value() {
+    let mut app = settings_mouse_app("settings-click-arrows");
+    app.handle_mouse(down(47, 4)); // › on the theme row
+    assert_eq!(app.config.theme_name, "light");
+    app.handle_mouse(down(30, 4)); // ‹
+    assert_eq!(app.config.theme_name, "default");
+    // › on the side_padding row selects it and steps it
+    app.handle_mouse(down(47, 5));
+    assert_eq!(app.config.side_padding, 2);
+    match &app.prompt {
+        Prompt::Settings { selected, .. } => assert_eq!(*selected, 1),
+        _ => panic!("popup closed"),
+    }
+}
+
+#[test]
+fn clicking_outside_the_settings_popup_closes_it() {
+    let mut app = settings_mouse_app("settings-click-outside");
+    app.handle_mouse(down(2, 2));
+    assert!(matches!(app.prompt, Prompt::None));
+    // and that click does not fall through to the tree/editor
+    assert_eq!(app.tree.selected(), 0);
+}
+
+#[test]
+fn settings_popup_ignores_clicks_before_its_first_draw() {
+    let mut app = App::new(fixture("settings-click-nodraw"), Config::default()).unwrap();
+    app.handle_key(key(KeyCode::Char('s')));
+    app.handle_mouse(down(2, 2));
+    assert!(matches!(app.prompt, Prompt::Settings { .. }));
+}
