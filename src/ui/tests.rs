@@ -446,7 +446,7 @@ fn draw_records_settings_popup_hits_with_arrows_on_the_glyphs() {
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buf = terminal.backend().buffer();
     let hits = app.settings_hits.clone().expect("recorded");
-    assert_eq!(hits.rows.len(), 2);
+    assert_eq!(hits.rows.len(), 5);
     for (i, row) in hits.rows.iter().enumerate() {
         assert_eq!(row.y, hits.popup.y + 1 + i as u16);
         assert_eq!(buf.cell((row.prev_x, row.y)).unwrap().symbol(), "‹");

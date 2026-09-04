@@ -1016,7 +1016,7 @@ fn s_in_tree_opens_settings_on_the_current_theme() {
         panic!("expected Settings prompt");
     };
     assert_eq!(*selected, 0);
-    assert_eq!(rows.len(), 2);
+    assert_eq!(rows.len(), 5);
     assert_eq!(rows[0].name, "theme");
     assert_eq!(rows[0].value(), "mono");
     assert_eq!(
@@ -1126,7 +1126,7 @@ fn settings_second_row_cycles_side_padding_and_persists() {
         panic!("expected Settings prompt");
     };
     assert_eq!(*selected, 0);
-    assert_eq!(rows.len(), 2);
+    assert_eq!(rows.len(), 5);
     assert_eq!(rows[1].name, "side_padding");
     assert_eq!(rows[1].value(), "1");
     assert_eq!(rows[1].choices.len(), 21);
@@ -1140,12 +1140,71 @@ fn settings_second_row_cycles_side_padding_and_persists() {
         "theme = default\nside_padding = 2\n"
     );
 
-    // j clamps at the last row; h wraps 0 → 20
-    app.handle_key(key(KeyCode::Char('j')));
+    // h wraps 0 → 20
     app.handle_key(key(KeyCode::Char('h')));
     app.handle_key(key(KeyCode::Char('h')));
     app.handle_key(key(KeyCode::Char('h')));
     assert_eq!(app.config.side_padding, 20);
+}
+
+#[test]
+fn settings_cursor_rows_cycle_shape_blink_and_color_and_persist() {
+    use crate::cursor::Shape;
+    let root = fixture("settings-cursor");
+    let cfg_dir = root.parent().unwrap().join("xdg");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
+    std::fs::write(cfg_dir.join("config"), "cursor_color = #123abc\n").unwrap();
+    let cfg = Config {
+        cursor_color: "#123abc".to_string(),
+        ..Config::default()
+    };
+    let mut app = App::new(root, cfg).unwrap();
+    app.config_dir = Some(cfg_dir.clone());
+
+    app.handle_key(key(KeyCode::Char('s')));
+    let Prompt::Settings { rows, .. } = &app.prompt else {
+        panic!("expected Settings prompt");
+    };
+    assert_eq!(rows[2].name, "cursor_shape");
+    assert_eq!(rows[2].value(), "default");
+    assert_eq!(rows[2].choices, ["default", "block", "bar", "underline"]);
+    assert_eq!(rows[3].name, "cursor_blink");
+    assert_eq!(rows[3].value(), "on");
+    assert_eq!(rows[4].name, "cursor_color");
+    // a hex from the file isn't in the named list: appended so the row
+    // starts on it
+    assert_eq!(rows[4].value(), "#123abc");
+    assert_eq!(rows[4].choices.len(), crate::cursor::COLOR_NAMES.len() + 1);
+
+    // row 2: default → block
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Char('l')));
+    assert_eq!(app.config.cursor_shape, Shape::Block);
+    assert_eq!(app.status.as_deref(), Some("cursor_shape: block"));
+    // row 3: on → off
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Char('l')));
+    assert!(!app.config.cursor_blink);
+    // row 4 (the last; j clamps there): #123abc wraps → default
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Char('l')));
+    assert_eq!(app.config.cursor_color, "default");
+    app.handle_key(key(KeyCode::Char('l')));
+    assert_eq!(app.config.cursor_color, "white");
+    assert_eq!(
+        std::fs::read_to_string(cfg_dir.join("config")).unwrap(),
+        "cursor_color = white\ncursor_shape = block\ncursor_blink = off\n"
+    );
+
+    // the file round-trips through the parser
+    let (reparsed, warnings) =
+        crate::config::parse(&std::fs::read_to_string(cfg_dir.join("config")).unwrap());
+    assert!(warnings.is_empty());
+    assert_eq!(reparsed.cursor_shape, Shape::Block);
+    assert!(!reparsed.cursor_blink);
+    assert_eq!(reparsed.cursor_color, "white");
 }
 
 #[test]

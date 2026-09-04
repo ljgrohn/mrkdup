@@ -24,6 +24,12 @@ pub struct Config {
     /// Builtin color theme (`default`, `light`, `mono`), or the name of
     /// a file under `$XDG_CONFIG_HOME/mrkdup/themes/`; validated by `valid_theme_name`.
     pub theme_name: String,
+    /// Terminal cursor shape (`default` = leave the terminal's own).
+    pub cursor_shape: crate::cursor::Shape,
+    /// Whether the cursor blinks; only applies with an explicit `cursor_shape`.
+    pub cursor_blink: bool,
+    /// Cursor color: `default`, a name from `cursor::COLOR_NAMES`, or `#rrggbb`.
+    pub cursor_color: String,
 }
 
 impl Default for Config {
@@ -36,6 +42,9 @@ impl Default for Config {
             tree_refresh_seconds: 2,
             side_padding: 1,
             theme_name: "default".to_string(),
+            cursor_shape: crate::cursor::Shape::Default,
+            cursor_blink: true,
+            cursor_color: "default".to_string(),
         }
     }
 }
@@ -95,10 +104,42 @@ pub fn parse(text: &str) -> (Config, Vec<String>) {
                     warnings.push(format!("line {n}: theme: invalid name {value:?}"));
                 }
             }
+            "cursor_shape" => match crate::cursor::Shape::parse(&value.to_ascii_lowercase()) {
+                Some(shape) => cfg.cursor_shape = shape,
+                None => warnings.push(format!(
+                    "line {n}: cursor_shape: expected default | block | bar | underline, got {value:?}"
+                )),
+            },
+            "cursor_blink" => match parse_bool(value) {
+                Some(b) => cfg.cursor_blink = b,
+                None => warnings.push(format!(
+                    "line {n}: cursor_blink: expected on | off, got {value:?}"
+                )),
+            },
+            "cursor_color" => {
+                let value = value.to_ascii_lowercase();
+                if crate::cursor::valid_color(&value) {
+                    cfg.cursor_color = value;
+                } else {
+                    warnings.push(format!(
+                        "line {n}: cursor_color: expected default, a color name, or #rrggbb, got {value:?}"
+                    ));
+                }
+            }
             _ => warnings.push(format!("line {n}: unknown option: {key}")),
         }
     }
     (cfg, warnings)
+}
+
+/// `on`/`off` as written by the settings popup, plus the usual
+/// spellings; case-insensitive.
+fn parse_bool(value: &str) -> Option<bool> {
+    match value.to_ascii_lowercase().as_str() {
+        "on" | "true" | "yes" | "1" => Some(true),
+        "off" | "false" | "no" | "0" => Some(false),
+        _ => None,
+    }
 }
 
 /// `^[a-z][a-z0-9_-]{0,31}$`, hand-checked (no regex dependency).

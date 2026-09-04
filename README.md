@@ -116,9 +116,9 @@ optional — no file means all defaults — and it never causes a crash:
 lines that can't be parsed (or name an unknown option) are ignored, with
 a one-line warning in the status bar.
 
-`theme` and `side_padding` can also be changed from inside mrkdup: press
-`s` in the tree pane; the choice applies immediately and is written back
-to this file.
+`theme`, `side_padding`, and the three `cursor_*` options can also be
+changed from inside mrkdup: press `s` in the tree pane; the choice
+applies immediately and is written back to this file.
 
 The format is plain `key = value` lines; a line starting with `#` is a
 comment (inline comments after a value are not supported) and blank
@@ -133,6 +133,11 @@ autosave_seconds = 10
 side_padding = 1
 # default | light | mono | firmitas | tokyonight
 theme = default
+# default | block | bar | underline
+cursor_shape = block
+cursor_blink = off
+# default, a color name, or #rrggbb
+cursor_color = orange
 ```
 
 | Option | Default | Range | Meaning |
@@ -144,6 +149,14 @@ theme = default
 | `tree_refresh_seconds` | 2 | 1–600 | seconds between automatic tree refreshes |
 | `side_padding` | 1 | 0–20 | columns of empty space between the terminal edges and the panes (padding outside the borders; `side_margin_percent` is the text margin inside the editor) |
 | `theme` | `default` | see below | `default` (current look), `light` (dark fg for light terminals), `mono` (no color, modifiers only), `firmitas` (Omarchy navy/bronze/gold, truecolor), `tokyonight` (truecolor), or any other name — see Themes |
+| `cursor_shape` | `default` | `default`, `block`, `bar`, `underline` | the terminal cursor's shape while mrkdup runs; `default` leaves whatever the terminal profile uses |
+| `cursor_blink` | `on` | `on`, `off` | whether the cursor blinks; only takes effect with an explicit `cursor_shape` (the terminal can't be told "keep your shape but stop blinking") |
+| `cursor_color` | `default` | `default`, `white`, `black`, `gray`, `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `magenta`, or `#rrggbb` | the cursor color; `default` leaves the terminal's own. The popup offers the names; the file also takes a hex |
+
+The cursor options use the standard DECSCUSR and OSC 12 escapes, which
+Windows Terminal, iTerm2, kitty, WezTerm, Ghostty, Alacritty, foot, and
+xterm all honor; a terminal that doesn't simply ignores them. mrkdup
+resets the cursor to the terminal's defaults on exit.
 
 ### Themes
 

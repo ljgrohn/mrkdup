@@ -2,6 +2,7 @@ mod app;
 mod checkbox;
 mod clipboard;
 mod config;
+mod cursor;
 mod editor;
 mod files;
 mod fsutil;
@@ -77,6 +78,8 @@ fn main() -> io::Result<()> {
     // terminal's own selection in most emulators.)
     let _ = execute!(io::stdout(), EnableMouseCapture);
     let result = run(&mut terminal, &mut app);
+    // Give the shell its own cursor back (shape, blink, color).
+    let _ = cursor::reset(&mut io::stdout());
     let _ = execute!(io::stdout(), DisableMouseCapture);
     if enhanced {
         let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
@@ -86,7 +89,15 @@ fn main() -> io::Result<()> {
 }
 
 fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut app::App) -> io::Result<()> {
+    // The cursor's look is sent once at startup and again whenever the
+    // settings popup changes a `cursor_*` option.
+    let mut applied: Option<cursor::Cursor> = None;
     loop {
+        let wanted = cursor::Cursor::from_config(&app.config);
+        if applied.as_ref() != Some(&wanted) {
+            let _ = cursor::apply(&mut io::stdout(), &wanted);
+            applied = Some(wanted);
+        }
         terminal.draw(|f| ui::draw(f, app))?;
         if event::poll(Duration::from_millis(250))? {
             match event::read()? {

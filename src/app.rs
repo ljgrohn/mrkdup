@@ -552,7 +552,9 @@ impl App {
     /// Build the settings rows. The theme row lists the builtins, then
     /// the user's `themes/` files; it starts on the configured name (or
     /// `default` if that name isn't in the list). The side-padding row
-    /// lists every column 0..=20.
+    /// lists every column 0..=20. The cursor rows list the shapes, on/off
+    /// for blink, and the named colors — plus the configured `#rrggbb`
+    /// when the file has one, so the row starts on it.
     fn open_settings(&mut self) {
         let mut choices: Vec<String> = crate::theme::BUILTINS
             .iter()
@@ -567,6 +569,25 @@ impl App {
             .unwrap_or(0);
         let padding_choices: Vec<String> = (0..=20u16).map(|n| n.to_string()).collect();
         let padding_index = (self.config.side_padding as usize).min(20);
+        let shape_choices: Vec<String> = crate::cursor::Shape::ALL
+            .iter()
+            .map(|s| s.as_str().to_string())
+            .collect();
+        let shape_index = crate::cursor::Shape::ALL
+            .iter()
+            .position(|s| *s == self.config.cursor_shape)
+            .unwrap_or(0);
+        let mut color_choices: Vec<String> = crate::cursor::COLOR_NAMES
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        if !color_choices.contains(&self.config.cursor_color) {
+            color_choices.push(self.config.cursor_color.clone());
+        }
+        let color_index = color_choices
+            .iter()
+            .position(|c| *c == self.config.cursor_color)
+            .unwrap_or(0);
         self.prompt = Prompt::Settings {
             rows: vec![
                 SettingRow {
@@ -578,6 +599,21 @@ impl App {
                     name: "side_padding",
                     choices: padding_choices,
                     index: padding_index,
+                },
+                SettingRow {
+                    name: "cursor_shape",
+                    choices: shape_choices,
+                    index: shape_index,
+                },
+                SettingRow {
+                    name: "cursor_blink",
+                    choices: vec!["on".to_string(), "off".to_string()],
+                    index: if self.config.cursor_blink { 0 } else { 1 },
+                },
+                SettingRow {
+                    name: "cursor_color",
+                    choices: color_choices,
+                    index: color_index,
                 },
             ],
             selected: 0,
@@ -604,6 +640,18 @@ impl App {
             }
             "side_padding" => {
                 self.config.side_padding = value.parse::<u16>().unwrap_or(1).min(20);
+            }
+            // The run loop in main.rs notices these changed and re-sends
+            // the cursor escapes before the next draw.
+            "cursor_shape" => {
+                self.config.cursor_shape =
+                    crate::cursor::Shape::parse(value).unwrap_or(crate::cursor::Shape::Default);
+            }
+            "cursor_blink" => self.config.cursor_blink = value == "on",
+            "cursor_color" => {
+                if crate::cursor::valid_color(value) {
+                    self.config.cursor_color = value.to_string();
+                }
             }
             _ => return,
         }

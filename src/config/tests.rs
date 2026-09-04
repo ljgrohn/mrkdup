@@ -238,6 +238,55 @@ fn side_padding_parses_clamps_and_defaults() {
 }
 
 #[test]
+fn cursor_keys_parse_and_default_to_the_terminals_own_cursor() {
+    use crate::cursor::Shape;
+    let cfg = Config::default();
+    assert_eq!(cfg.cursor_shape, Shape::Default);
+    assert!(cfg.cursor_blink);
+    assert_eq!(cfg.cursor_color, "default");
+
+    let (cfg, warnings) =
+        parse("cursor_shape = Block\ncursor_blink = off\ncursor_color = Orange\n");
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(cfg.cursor_shape, Shape::Block);
+    assert!(!cfg.cursor_blink);
+    assert_eq!(cfg.cursor_color, "orange");
+
+    let (cfg, _) = parse("cursor_blink = false\ncursor_color = #AABBCC\n");
+    assert!(!cfg.cursor_blink);
+    assert_eq!(cfg.cursor_color, "#aabbcc");
+    let (cfg, _) = parse("cursor_blink = yes\ncursor_shape = underline\n");
+    assert!(cfg.cursor_blink);
+    assert_eq!(cfg.cursor_shape, Shape::Underline);
+}
+
+#[test]
+fn cursor_keys_warn_on_bad_values_and_keep_defaults() {
+    let (cfg, warnings) =
+        parse("cursor_shape = beam\ncursor_blink = maybe\ncursor_color = mauve\n");
+    assert_eq!(cfg, Config::default());
+    assert_eq!(warnings.len(), 3);
+    assert!(
+        warnings[0].starts_with("line 1: cursor_shape:"),
+        "{}",
+        warnings[0]
+    );
+    assert!(
+        warnings[1].starts_with("line 2: cursor_blink:"),
+        "{}",
+        warnings[1]
+    );
+    assert!(
+        warnings[2].starts_with("line 3: cursor_color:"),
+        "{}",
+        warnings[2]
+    );
+    let (cfg, warnings) = parse("cursor_color = #abc\n");
+    assert_eq!(cfg.cursor_color, "default");
+    assert_eq!(warnings.len(), 1);
+}
+
+#[test]
 fn rewrite_key_line_is_generic_over_the_key() {
     assert_eq!(
         rewrite_key_line("theme = light\n", "side_padding", "2"),
