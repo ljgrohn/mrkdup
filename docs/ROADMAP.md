@@ -132,7 +132,7 @@ Hardening (not defects):
 
 Docs drift:
 
-- [ ] Fix stale `theme_name` doc comment (`src/config.rs`): says
+- [x] Fix stale `theme_name` doc comment (`src/config.rs`): says
   "(`default`, `light`, `mono`)" but there are five builtins
   (`firmitas`, `tokyonight` included). README is already correct.
 - [ ] Clarify the README config example. The `ini` sample shows
