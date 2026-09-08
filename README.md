@@ -16,7 +16,9 @@ coloring in `.html` files and for inline HTML in markdown, and code
 syntax — keywords, types, functions, strings, comments, numbers — for
 Rust (`.rs`), JavaScript/TypeScript (`.js`, `.mjs`, `.cjs`, `.jsx`,
 `.ts`, `.tsx`), CSS/SCSS, and SQL, both as files and inside fenced
-blocks tagged with the language. Every character stays visible; syntax
+blocks tagged with the language. Inside `.html` files, `<style>`
+bodies highlight as CSS and `<script>` bodies as JavaScript.
+Every character stays visible; syntax
 marks are dimmed, never hidden, so the layout never shifts under your
 cursor. Tabs display as 4 spaces, not tab-stops.
 

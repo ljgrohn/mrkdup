@@ -106,6 +106,8 @@ struct State {
     fence_code: Option<FileKind>,
     in_frontmatter: bool,
     in_comment: bool,
+    /// inside an HTML raw-text element: its body highlights as this language
+    html_embed: Option<FileKind>,
     rust: RustState,
     code: code::CodeState,
 }
@@ -407,7 +409,9 @@ fn tag_spans(chars: &[char], start: usize, end: usize) -> Vec<SpanTok> {
     spans
 }
 
-/// One line of an .html file. Comments carry across lines.
+/// One line of an .html file. Comments and `<style>` / `<script>`
+/// raw-text bodies carry across lines: tag markup highlights as HTML,
+/// style bodies as CSS and script bodies as JavaScript.
 fn html_line(chars: &[char], state: &mut State) -> Vec<SpanTok> {
     let n = chars.len();
     let mut spans = Vec::new();
@@ -435,6 +439,35 @@ fn html_line(chars: &[char], state: &mut State) -> Vec<SpanTok> {
             }
             continue;
         }
+        if let Some(embed) = state.html_embed {
+            let tag = match embed {
+                FileKind::Css => "style",
+                FileKind::JavaScript => "script",
+                _ => "",
+            };
+            if let Some(open) = find_closing_tag(chars, i, tag) {
+                if open > i {
+                    push_embed_spans(&mut spans, chars, i, open, state, embed);
+                }
+                match find_tag_end(chars, open + 1) {
+                    Some(gt) => {
+                        spans.extend(tag_spans(chars, open, gt + 1));
+                        i = gt + 1;
+                    }
+                    None => {
+                        // split closing tag: leave it as text, keep the embed
+                        spans.push(tok(open, n, Kind::Text));
+                        return spans;
+                    }
+                }
+                state.html_embed = None;
+                state.code = code::CodeState::default();
+            } else {
+                push_embed_spans(&mut spans, chars, i, n, state, embed);
+                return spans;
+            }
+            continue;
+        }
         if chars[i] == '<' {
             // comment open?
             let is_comment = chars.get(i + 1) == Some(&'!')
@@ -444,8 +477,18 @@ fn html_line(chars: &[char], state: &mut State) -> Vec<SpanTok> {
                 state.in_comment = true;
                 continue; // loop re-enters the in_comment branch at i
             }
-            if let Some(gt) = find(chars, i + 1, n, '>') {
+            if let Some(gt) = find_tag_end(chars, i + 1) {
                 spans.extend(tag_spans(chars, i, gt + 1));
+                let (closing, name, self_closing) = html_tag_name(chars, i, gt + 1);
+                if !closing && !self_closing {
+                    if name == "style" {
+                        state.html_embed = Some(FileKind::Css);
+                        state.code = code::CodeState::default();
+                    } else if name == "script" {
+                        state.html_embed = Some(FileKind::JavaScript);
+                        state.code = code::CodeState::default();
+                    }
+                }
                 i = gt + 1;
                 continue;
             }
@@ -457,6 +500,111 @@ fn html_line(chars: &[char], state: &mut State) -> Vec<SpanTok> {
         i = next;
     }
     spans
+}
+
+/// Index of the `>` that ends the tag opened before `from` (just past
+/// its `<`), skipping `>`s inside quoted attribute values.
+fn find_tag_end(chars: &[char], from: usize) -> Option<usize> {
+    let mut quote: Option<char> = None;
+    let mut j = from;
+    while j < chars.len() {
+        let c = chars[j];
+        if let Some(q) = quote {
+            if c == q {
+                quote = None;
+            }
+        } else if c == '"' || c == '\'' {
+            quote = Some(c);
+        } else if c == '>' {
+            return Some(j);
+        }
+        j += 1;
+    }
+    None
+}
+
+/// `(is_closing, lowercase tag name, is_self_closing)` for `chars[start..end]`,
+/// where `start` is `<` and `end` is just past `>`.
+fn html_tag_name(chars: &[char], start: usize, end: usize) -> (bool, String, bool) {
+    let mut j = start + 1;
+    let mut closing = false;
+    if chars.get(j) == Some(&'/') {
+        closing = true;
+        j += 1;
+    }
+    while j < end && chars[j].is_whitespace() {
+        j += 1;
+    }
+    let name_start = j;
+    while j < end && (chars[j].is_ascii_alphanumeric() || chars[j] == '-') {
+        j += 1;
+    }
+    let name: String = chars[name_start..j.min(end)]
+        .iter()
+        .collect::<String>()
+        .to_ascii_lowercase();
+    // `<tag ... />`: the last non-space char before `>` is a slash
+    let mut k = end.saturating_sub(2);
+    while k > start && chars.get(k).is_some_and(|c| c.is_whitespace()) {
+        k = k.saturating_sub(1);
+    }
+    let self_closing = chars.get(k) == Some(&'/');
+    (closing, name, self_closing)
+}
+
+/// Index of the `<` that opens `</tag ...>` at or after `from`
+/// (case-insensitive), if on this line. Anything else — `<div`, `<taggy>`
+/// — does not match.
+fn find_closing_tag(chars: &[char], from: usize, tag: &str) -> Option<usize> {
+    if tag.is_empty() {
+        return None;
+    }
+    let tag: Vec<char> = tag.chars().collect();
+    let mut j = from;
+    while j < chars.len() {
+        if chars[j] == '<'
+            && chars.get(j + 1) == Some(&'/')
+            && chars.len() >= j + 2 + tag.len()
+            && chars[j + 2..j + 2 + tag.len()]
+                .iter()
+                .zip(tag.iter())
+                .all(|(a, b)| a.to_ascii_lowercase() == *b)
+        {
+            let after = j + 2 + tag.len();
+            let boundary = chars
+                .get(after)
+                .is_none_or(|&c| c == '>' || c == '/' || c.is_whitespace());
+            if boundary {
+                return Some(j);
+            }
+        }
+        j += 1;
+    }
+    None
+}
+
+/// Highlight `chars[s..e]` as the embedded language and push the spans
+/// offset by `s`.
+fn push_embed_spans(
+    spans: &mut Vec<SpanTok>,
+    chars: &[char],
+    s: usize,
+    e: usize,
+    state: &mut State,
+    embed: FileKind,
+) {
+    if e <= s {
+        return;
+    }
+    let sub = &chars[s..e];
+    let out = match embed {
+        FileKind::Css => code::css_line(sub, &mut state.code, Kind::Text),
+        FileKind::JavaScript => code::generic_line(sub, &mut state.code, Kind::Text, &code::JS),
+        _ => return,
+    };
+    for sp in out {
+        push_span(spans, sp.start + s, sp.end + s, sp.kind);
+    }
 }
 
 const RUST_KEYWORDS: &[&str] = &[

@@ -607,3 +607,162 @@ fn fence_state_resets_between_code_fences() {
         vec![Kind::Keyword, Kind::CodeBlock, Kind::Number]
     );
 }
+
+// ---- html <style> / <script> embeds ------------------------------------
+
+fn html_doc(lines: &[&str]) -> Vec<Vec<SpanTok>> {
+    let v: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+    highlight(&v, FileKind::Html)
+}
+
+#[test]
+fn html_style_body_highlights_as_css() {
+    let src = [
+        "<style>",
+        ":root { --orchard: #3D5A40; }",
+        "body { color: red; margin: -2px; }",
+        "</style>",
+    ];
+    let s = html_doc(&src);
+    for (line, spans) in src.iter().zip(&s) {
+        assert_covers(spans, line.chars().count());
+    }
+    assert!(kinds(&s[0]).contains(&Kind::HtmlTag));
+    assert!(kinds(&s[3]).contains(&Kind::HtmlTag));
+    assert_eq!(kind_of(src[1], &s[1], ":root"), Kind::TypeName);
+    assert_eq!(kind_of(src[1], &s[1], "#3D5A40"), Kind::Number);
+    assert_eq!(kind_of(src[2], &s[2], "body"), Kind::TypeName);
+    assert_eq!(kind_of(src[2], &s[2], "color"), Kind::Keyword);
+    assert_eq!(kind_of(src[2], &s[2], "-2px"), Kind::Number);
+}
+
+#[test]
+fn html_script_body_highlights_as_js() {
+    let src = ["<script>", "const total = compute(1); // sum", "</script>"];
+    let s = html_doc(&src);
+    for (line, spans) in src.iter().zip(&s) {
+        assert_covers(spans, line.chars().count());
+    }
+    assert_eq!(kind_of(src[1], &s[1], "const"), Kind::Keyword);
+    assert_eq!(kind_of(src[1], &s[1], "compute"), Kind::Function);
+    assert_eq!(kind_of(src[1], &s[1], "// sum"), Kind::Comment);
+    assert!(kinds(&s[2]).contains(&Kind::HtmlTag));
+}
+
+#[test]
+fn html_embeds_share_a_line_with_markup_and_ignore_case() {
+    let src = [
+        "<STYLE>.a { color: red }</STYLE> after",
+        "<Script>let x = 1;</Script>",
+    ];
+    let s = html_doc(&src);
+    for (line, spans) in src.iter().zip(&s) {
+        assert_covers(spans, line.chars().count());
+    }
+    assert_eq!(kind_of(src[0], &s[0], ".a"), Kind::TypeName);
+    assert_eq!(kind_of(src[0], &s[0], "color"), Kind::Keyword);
+    assert_eq!(kind_of(src[0], &s[0], "after"), Kind::Text);
+    assert_eq!(kind_of(src[1], &s[1], "let"), Kind::Keyword);
+    assert_eq!(kind_of(src[1], &s[1], "1"), Kind::Number);
+}
+
+#[test]
+fn html_lt_in_script_is_not_a_tag() {
+    let src = [
+        "<script>",
+        "if (a < b) { foo(); }",
+        "</script>",
+        "<div>hi</div>",
+    ];
+    let s = html_doc(&src);
+    assert_eq!(kind_of(src[1], &s[1], "foo"), Kind::Function);
+    assert!(!kinds(&s[1]).contains(&Kind::HtmlTag));
+    assert!(kinds(&s[3]).contains(&Kind::HtmlTag));
+    assert!(kinds(&s[3]).contains(&Kind::Text)); // "hi"
+}
+
+#[test]
+fn html_close_prefix_does_not_end_the_embed() {
+    let src = [
+        "<style>",
+        "a { color: red }",
+        "</stylesheet>",
+        "b { color: blue }",
+        "</style>",
+        "<p>x</p>",
+    ];
+    let s = html_doc(&src);
+    // a bogus `</stylesheet>` is CSS, not markup, and the embed survives it
+    assert!(!kinds(&s[2]).contains(&Kind::HtmlTag));
+    assert_eq!(kind_of(src[3], &s[3], "color"), Kind::Keyword);
+    assert!(kinds(&s[4]).contains(&Kind::HtmlTag));
+    assert!(kinds(&s[5]).contains(&Kind::HtmlTag));
+}
+
+#[test]
+fn html_embed_state_resets_after_close() {
+    // an unterminated CSS comment must not leak past </style> ...
+    let src = [
+        "<style>",
+        "/* open",
+        "</style>",
+        "<p>x</p>",
+        "<style>",
+        "b { color: blue }",
+        "</style>",
+    ];
+    let s = html_doc(&src);
+    assert_eq!(kinds(&s[1]), vec![Kind::Comment]);
+    assert!(kinds(&s[2]).contains(&Kind::HtmlTag));
+    assert!(kinds(&s[3]).contains(&Kind::HtmlTag));
+    // ... and the next block starts clean
+    assert_eq!(kind_of(src[5], &s[5], "color"), Kind::Keyword);
+    // same for an unterminated JS template literal
+    let src = ["<script>", "const t = `open", "</script>", "<p>x</p>"];
+    let s = html_doc(&src);
+    assert_eq!(kinds(&s[1]).last(), Some(&Kind::Str));
+    assert!(kinds(&s[3]).contains(&Kind::HtmlTag));
+}
+
+#[test]
+fn html_embed_ignores_comments_and_self_closing_tags() {
+    // a tag inside an HTML comment does not open an embed ...
+    let s = html_doc(&["<!-- <style> -->", "body { color: red }"]);
+    assert_eq!(kind_of("body { color: red }", &s[1], "color"), Kind::Text);
+    // ... and a self-closing tag does not either
+    let s = html_doc(&["<style />", "body { color: red }"]);
+    assert_eq!(kind_of("body { color: red }", &s[1], "color"), Kind::Text);
+    // `<!--` inside a script is JS, not an HTML comment
+    let s = html_doc(&["<script>", "<!-- var x = 1;", "</script>"]);
+    assert!(!kinds(&s[1]).contains(&Kind::HtmlComment));
+}
+
+#[test]
+fn html_tag_gt_in_quotes_still_opens_embed() {
+    let src = ["<script type=\"a>b\">", "let x = 1;", "</script>"];
+    let s = html_doc(&src);
+    assert!(kinds(&s[0]).contains(&Kind::HtmlTag));
+    assert_eq!(kind_of(src[1], &s[1], "let"), Kind::Keyword);
+}
+
+#[test]
+fn html_embed_css_comments_and_js_templates_span_lines() {
+    let src = [
+        "<style>",
+        "/* multi",
+        "line */ h1 { color: red }",
+        "</style>",
+        "<script>",
+        "const t = `one",
+        "two`; // done",
+        "</script>",
+    ];
+    let s = html_doc(&src);
+    for (line, spans) in src.iter().zip(&s) {
+        assert_covers(spans, line.chars().count());
+    }
+    assert_eq!(kinds(&s[1]), vec![Kind::Comment]);
+    assert_eq!(kind_of(src[2], &s[2], "h1"), Kind::TypeName);
+    assert_eq!(kinds(&s[5]), vec![Kind::Keyword, Kind::Text, Kind::Str]);
+    assert_eq!(kind_of(src[6], &s[6], "// done"), Kind::Comment);
+}
