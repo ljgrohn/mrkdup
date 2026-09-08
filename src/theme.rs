@@ -57,7 +57,14 @@ pub struct Theme {
 
 /// The shipped palettes, in the order the settings popup lists them.
 /// `Theme::named` and `is_builtin` both consult this list.
-pub const BUILTINS: &[&str] = &["default", "light", "mono", "firmitas", "tokyonight"];
+pub const BUILTINS: &[&str] = &[
+    "default",
+    "light",
+    "mono",
+    "firmitas",
+    "tokyonight",
+    "ember",
+];
 
 /// `#rrggbb` as a truecolor `Color`, for the builtin truecolor palettes.
 const fn rgb(hex: u32) -> Color {
@@ -310,6 +317,61 @@ impl Theme {
         }
     }
 
+    /// Warm near-black with amber-orange accents, olive green, and
+    /// muted brick red — foregrounds only, expects a `#1b1917`-ish
+    /// terminal background.
+    pub fn ember() -> Theme {
+        let bg = rgb(0x1b1917);
+        let fg = rgb(0xd8d2c5);
+        let cream = rgb(0xe8e2d4);
+        let muted = rgb(0x6f695e);
+        let faint = rgb(0x3f3a34);
+        let bark = rgb(0x4a4238);
+        let orange = rgb(0xdb8a3e);
+        let amber = rgb(0xe0a95c);
+        let tan = rgb(0xc9b896);
+        let green = rgb(0x93a657);
+        let red = rgb(0xc05f5a);
+        Theme {
+            name: "ember".to_string(),
+            border_focused: Style::default().fg(orange),
+            border_unfocused: Style::default().fg(faint),
+            popup_border: Style::default().fg(orange),
+            status_bar: Style::default().fg(orange).bg(bg),
+            selection: Style::default().fg(cream).bg(bark),
+            prompt_cursor: Style::default().add_modifier(Modifier::REVERSED),
+            welcome: Style::default().fg(muted),
+            tree_open: Style::default().fg(orange),
+            tab_active: Style::default().fg(orange).add_modifier(Modifier::BOLD),
+            tab_inactive: Style::default().add_modifier(Modifier::DIM),
+            text: Style::default().fg(fg),
+            mark: Style::default().fg(muted),
+            heading1: Style::default().fg(orange).add_modifier(Modifier::BOLD),
+            heading2: Style::default().fg(orange),
+            heading: Style::default().fg(amber),
+            bold: Style::default().fg(fg).add_modifier(Modifier::BOLD),
+            italic: Style::default().fg(fg).add_modifier(Modifier::ITALIC),
+            code: Style::default().fg(green),
+            checkbox: Style::default().fg(orange),
+            done: Style::default().fg(muted),
+            quote: Style::default().fg(green),
+            link: Style::default()
+                .fg(orange)
+                .add_modifier(Modifier::UNDERLINED),
+            bullet: Style::default().fg(orange),
+            html_tag: Style::default().fg(orange),
+            html_attr: Style::default().fg(green),
+            search_match: Style::default().fg(bg).bg(orange),
+            keyword: Style::default().fg(orange),
+            type_name: Style::default().fg(tan),
+            string: Style::default().fg(green),
+            comment: Style::default().fg(muted),
+            number: Style::default().fg(amber),
+            macro_call: Style::default().fg(red),
+            function: Style::default().fg(fg),
+        }
+    }
+
     /// The builtin named `name`, or `Theme::default()` if `name` isn't
     /// one of the builtins.
     pub fn named(name: &str) -> Theme {
@@ -318,6 +380,7 @@ impl Theme {
             "mono" => Theme::mono(),
             "firmitas" => Theme::firmitas(),
             "tokyonight" => Theme::tokyonight(),
+            "ember" => Theme::ember(),
             _ => Theme::default(),
         }
     }

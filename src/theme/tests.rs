@@ -95,6 +95,7 @@ fn named_looks_up_builtins_and_falls_back_to_default() {
     assert_eq!(Theme::named("default"), Theme::default());
     assert_eq!(Theme::named("light"), Theme::light());
     assert_eq!(Theme::named("mono"), Theme::mono());
+    assert_eq!(Theme::named("ember"), Theme::ember());
     assert_eq!(Theme::named("nonexistent"), Theme::default());
 }
 
@@ -565,10 +566,56 @@ fn tokyonight_matches_the_spec_table() {
 }
 
 #[test]
+fn ember_matches_the_spec_table() {
+    let t = Theme::ember();
+    assert_eq!(t.name, "ember");
+    let expected = [
+        ("text", t.text, fg(0xd8d2c5)),
+        ("bold", t.bold, fg_mod(0xd8d2c5, Modifier::BOLD)),
+        ("italic", t.italic, fg_mod(0xd8d2c5, Modifier::ITALIC)),
+        ("mark", t.mark, fg(0x6f695e)),
+        ("done", t.done, fg(0x6f695e)),
+        ("welcome", t.welcome, fg(0x6f695e)),
+        ("heading1", t.heading1, fg_mod(0xdb8a3e, Modifier::BOLD)),
+        ("heading2", t.heading2, fg(0xdb8a3e)),
+        ("heading", t.heading, fg(0xe0a95c)),
+        ("code", t.code, fg(0x93a657)),
+        ("quote", t.quote, fg(0x93a657)),
+        ("link", t.link, fg_mod(0xdb8a3e, Modifier::UNDERLINED)),
+        ("bullet", t.bullet, fg(0xdb8a3e)),
+        ("checkbox", t.checkbox, fg(0xdb8a3e)),
+        ("html_tag", t.html_tag, fg(0xdb8a3e)),
+        ("html_attr", t.html_attr, fg(0x93a657)),
+        ("border_focused", t.border_focused, fg(0xdb8a3e)),
+        ("popup_border", t.popup_border, fg(0xdb8a3e)),
+        ("border_unfocused", t.border_unfocused, fg(0x3f3a34)),
+        ("status_bar", t.status_bar, fg_bg(0xdb8a3e, 0x1b1917)),
+        ("tree_open", t.tree_open, fg(0xdb8a3e)),
+        ("selection", t.selection, fg_bg(0xe8e2d4, 0x4a4238)),
+        ("search_match", t.search_match, fg_bg(0x1b1917, 0xdb8a3e)),
+        (
+            "prompt_cursor",
+            t.prompt_cursor,
+            Style::default().add_modifier(Modifier::REVERSED),
+        ),
+    ];
+    for (slot, got, want) in expected {
+        assert_eq!(got, want, "ember slot {slot}");
+    }
+}
+
+#[test]
 fn builtins_round_trip_through_named_and_are_valid_names() {
     assert_eq!(
         BUILTINS,
-        &["default", "light", "mono", "firmitas", "tokyonight"]
+        &[
+            "default",
+            "light",
+            "mono",
+            "firmitas",
+            "tokyonight",
+            "ember"
+        ]
     );
     for name in BUILTINS {
         assert_eq!(Theme::named(name).name, *name, "named({name})");

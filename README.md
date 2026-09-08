@@ -136,7 +136,7 @@ top_margin_percent = 3
 autosave_seconds = 10
 tree_refresh_seconds = 2
 side_padding = 1
-# default | light | mono | firmitas | tokyonight
+# default | light | mono | firmitas | tokyonight | ember
 theme = default
 # default | block | bar | underline
 cursor_shape = block
@@ -153,7 +153,7 @@ cursor_color = orange
 | `autosave_seconds` | 2 | 1–600 | idle seconds before a dirty buffer autosaves |
 | `tree_refresh_seconds` | 2 | 1–600 | seconds between automatic tree refreshes |
 | `side_padding` | 1 | 0–20 | columns of empty space between the terminal edges and the panes (padding outside the borders; `side_margin_percent` is the text margin inside the editor) |
-| `theme` | `default` | see below | `default` (current look), `light` (dark fg for light terminals), `mono` (no color, modifiers only), `firmitas` (Omarchy navy/bronze/gold, truecolor), `tokyonight` (truecolor), or any other name — see Themes |
+| `theme` | `default` | see below | `default` (current look), `light` (dark fg for light terminals), `mono` (no color, modifiers only), `firmitas` (Omarchy navy/bronze/gold, truecolor), `tokyonight` (truecolor), `ember` (warm near-black/amber, truecolor), or any other name — see Themes |
 | `cursor_shape` | `default` | `default`, `block`, `bar`, `underline` | the terminal cursor's shape while mrkdup runs; `default` leaves whatever the terminal profile uses |
 | `cursor_blink` | `on` | `on`, `off` | whether the cursor blinks; only takes effect with an explicit `cursor_shape` (the terminal can't be told "keep your shape but stop blinking") |
 | `cursor_color` | `default` | `default`, `white`, `black`, `gray`, `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `magenta`, or `#rrggbb` | the cursor color; `default` leaves the terminal's own. The popup offers the names; the file also takes a hex |
@@ -165,11 +165,11 @@ resets the cursor to the terminal's defaults on exit.
 
 ### Themes
 
-`theme` picks one of the five builtins (`default`, `light`, `mono`, `firmitas`, `tokyonight`) by
+`theme` picks one of the six builtins (`default`, `light`, `mono`, `firmitas`, `tokyonight`, `ember`) by
 name. Any other name (matching `^[a-z][a-z0-9_-]{0,31}$`) is looked up as
 a file at `$XDG_CONFIG_HOME/mrkdup/themes/<name>` — an unknown name or a
 missing file falls back to `default` with a warning in the status bar.
-`firmitas` and `tokyonight` are truecolor and set foregrounds only — they assume the matching terminal background (`#0c1928` / `#1a1b26`).
+`firmitas`, `tokyonight`, and `ember` are truecolor and set foregrounds only — they assume the matching terminal background (`#0c1928` / `#1a1b26` / `#1b1917`).
 
 On top of whichever theme that resolves to, mrkdup applies
 `$XDG_CONFIG_HOME/mrkdup/theme` if it exists — an overlay file that

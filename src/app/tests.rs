@@ -1021,7 +1021,14 @@ fn s_in_tree_opens_settings_on_the_current_theme() {
     assert_eq!(rows[0].value(), "mono");
     assert_eq!(
         rows[0].choices,
-        vec!["default", "light", "mono", "firmitas", "tokyonight"]
+        vec![
+            "default",
+            "light",
+            "mono",
+            "firmitas",
+            "tokyonight",
+            "ember"
+        ]
     );
 }
 
@@ -1051,11 +1058,11 @@ fn settings_l_and_h_cycle_the_theme_live_and_wrap() {
     app.handle_key(key(KeyCode::Right));
     assert_eq!(app.theme, Theme::mono());
 
-    // wrap backwards from index 0
+    // wrap backwards from index 0 (ember is last in BUILTINS order)
     app.handle_key(key(KeyCode::Char('h')));
     app.handle_key(key(KeyCode::Left));
     app.handle_key(key(KeyCode::Char('h')));
-    assert_eq!(app.theme.name, "tokyonight");
+    assert_eq!(app.theme.name, "ember");
     assert!(
         matches!(app.prompt, Prompt::Settings { .. }),
         "popup stays open while cycling"

@@ -21,8 +21,9 @@ pub struct Config {
     /// (0..=20). Padding *outside* the borders; `side_margin_percent`
     /// is the text margin inside the editor pane.
     pub side_padding: u16,
-    /// Builtin color theme (`default`, `light`, `mono`), or the name of
-    /// a file under `$XDG_CONFIG_HOME/mrkdup/themes/`; validated by `valid_theme_name`.
+    /// Builtin color theme (`default`, `light`, `mono`, `firmitas`,
+    /// `tokyonight`, `ember`), or the name of a file under
+    /// `$XDG_CONFIG_HOME/mrkdup/themes/`; validated by `valid_theme_name`.
     pub theme_name: String,
     /// Terminal cursor shape (`default` = leave the terminal's own).
     pub cursor_shape: crate::cursor::Shape,
