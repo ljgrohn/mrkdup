@@ -95,7 +95,6 @@ fn atomic_write_deletes_temp_file_on_rename_failure() {
     // Create a directory with the target name so rename will fail
     fs::create_dir(&out_path).unwrap();
 
-    let tmp_path = dir.join(".out.md.mrkdup-tmp");
     // Call atomic_write, which should fail because it can't rename over a directory
     let result = atomic_write(&out_path, b"content\n");
     assert!(
@@ -103,9 +102,71 @@ fn atomic_write_deletes_temp_file_on_rename_failure() {
         "atomic_write should fail when target is a directory"
     );
 
-    // The key assertion: temp file must be cleaned up
+    // The key assertion: no stray temp file may be left behind. Temp
+    // names are unique per write, so scan for the marker instead of a
+    // fixed name.
     assert!(
-        !tmp_path.exists(),
+        !has_stray_tmps(&dir),
         "temp file should be deleted after atomic_write fails"
+    );
+}
+
+/// True if the directory holds any leftover `atomic_write` temp file.
+fn has_stray_tmps(dir: &std::path::Path) -> bool {
+    fs::read_dir(dir).unwrap().any(|e| {
+        e.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".mrkdup-tmp")
+    })
+}
+
+#[test]
+fn atomic_write_leaves_no_stray_tmps_across_writes() {
+    let dir = std::env::temp_dir().join("mrkdup-test-aw-unique");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let p = dir.join("out.md");
+    // Sequential writes must each use a fresh temp file and leave none
+    // behind; the last write wins.
+    atomic_write(&p, b"one\n").unwrap();
+    atomic_write(&p, b"two\n").unwrap();
+    assert_eq!(fs::read(&p).unwrap(), b"two\n");
+    assert!(
+        !has_stray_tmps(&dir),
+        "no temp files may remain after successful writes"
+    );
+}
+
+#[test]
+fn atomic_write_concurrent_writes_to_same_path() {
+    let dir = std::env::temp_dir().join("mrkdup-test-aw-concurrent");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let p = dir.join("out.md");
+    fs::write(&p, b"base\n").unwrap();
+
+    // With the old fixed temp name these threads raced on one temp file;
+    // unique names let every write land without error.
+    let handles: Vec<_> = (0..8)
+        .map(|i| {
+            let p = p.clone();
+            std::thread::spawn(move || {
+                atomic_write(&p, format!("writer {i}\n").as_bytes()).unwrap();
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().expect("writer thread panicked");
+    }
+
+    let body = fs::read_to_string(&p).unwrap();
+    assert!(
+        (0..8).any(|i| body == format!("writer {i}\n")),
+        "destination must hold exactly one complete write, got {body:?}"
+    );
+    assert!(
+        !has_stray_tmps(&dir),
+        "no temp files may remain after concurrent writes"
     );
 }

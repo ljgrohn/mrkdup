@@ -119,7 +119,7 @@ Correctness / edge cases:
 
 Hardening (not defects):
 
-- [ ] Harden `atomic_write` (`src/fsutil.rs`): fixed
+- [x] Harden `atomic_write` (`src/fsutil.rs`): fixed
   `.NAME.mrkdup-tmp` name collides on concurrent saves of the same path
   and litters a dotfile after a crash; no directory fsync after rename,
   so the rename itself can be lost on some filesystems after a crash.

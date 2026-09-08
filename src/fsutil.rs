@@ -1,39 +1,76 @@
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Per-process counter mixed into temp-file names so concurrent writes
+/// to the same path never share a temp file.
+static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn unique_tmp_path(dir: &Path, name: &std::ffi::OsStr) -> PathBuf {
+    let n = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    dir.join(format!(
+        ".{}.mrkdup-tmp.{}.{}",
+        name.to_string_lossy(),
+        std::process::id(),
+        n
+    ))
+}
+
+/// Persist a directory entry change (the rename below) so it survives a
+/// crash on filesystems that only make renames durable once the parent
+/// directory is synced.
+fn fsync_dir(dir: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        File::open(dir)?.sync_all()
+    }
+    #[cfg(not(unix))]
+    {
+        // No stable way to fsync a directory on this platform; the file
+        // data itself was already synced before the rename.
+        let _ = dir;
+        Ok(())
+    }
+}
 
 /// Write via a temp file in the same directory + rename, so a crash
 /// mid-write can never truncate the destination.
+///
+/// The temp name is unique per write (pid + counter) and created with
+/// `create_new`, so concurrent saves of the same path don't clobber each
+/// other's temp file. The temp file is removed on every failure path
+/// where it can still exist (after a successful rename there is nothing
+/// left to clean up).
 pub fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
     let dir = path.parent().unwrap_or(Path::new("."));
     let name = path
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
-    let tmp = dir.join(format!(".{}.mrkdup-tmp", name.to_string_lossy()));
-    {
-        let mut f = match File::create(&tmp) {
-            Ok(f) => f,
-            Err(e) => {
-                let _ = fs::remove_file(&tmp);
-                return Err(e);
+    // `create_new` fails rather than truncating if the name is taken, so
+    // retry with a fresh counter value on the (essentially impossible)
+    // collision instead of ever touching a file we didn't create.
+    let mut attempts = 0;
+    let (tmp, mut f) = loop {
+        let tmp = unique_tmp_path(dir, name);
+        match OpenOptions::new().write(true).create_new(true).open(&tmp) {
+            Ok(f) => break (tmp, f),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists && attempts < 10 => {
+                attempts += 1;
             }
-        };
-        if let Err(e) = f.write_all(contents) {
-            let _ = fs::remove_file(&tmp);
-            return Err(e);
+            Err(e) => return Err(e),
         }
-        if let Err(e) = f.sync_all() {
-            let _ = fs::remove_file(&tmp);
-            return Err(e);
-        }
+    };
+    if let Err(e) = f.write_all(contents).and_then(|()| f.sync_all()) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
     }
-    match std::fs::rename(&tmp, path) {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            let _ = fs::remove_file(&tmp);
-            Err(e)
-        }
+    drop(f);
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
     }
+    fsync_dir(dir)
 }
 
 // Test-only call counter so tests can observe whether a sniff actually
