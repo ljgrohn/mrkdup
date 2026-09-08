@@ -16,10 +16,9 @@ coloring in `.html` files and for inline HTML in markdown, and code
 syntax — keywords, types, functions, strings, comments, numbers — for
 Rust (`.rs`), JavaScript/TypeScript (`.js`, `.mjs`, `.cjs`, `.jsx`,
 `.ts`, `.tsx`), CSS/SCSS, and SQL, both as files and inside fenced
-blocks tagged with the language. Every
-character stays visible; syntax marks are dimmed, never hidden, so the
-layout never shifts under your cursor. Tabs display as 4 spaces, not
-tab-stops.
+blocks tagged with the language. Every character stays visible; syntax
+marks are dimmed, never hidden, so the layout never shifts under your
+cursor. Tabs display as 4 spaces, not tab-stops.
 
 Until you open a file, the editor pane shows a short key cheat sheet;
 it disappears the moment a file opens.
@@ -47,8 +46,12 @@ and arm64, static musl builds), and Windows are attached to each
 ## Use
 
 ```sh
-mrkdup [directory]   # defaults to the current directory
+mrkdup [directory]        # open the tree at directory (default: .)
+mrkdup --version | -V     # print the version
+mrkdup --help | -h        # usage
 ```
+
+Press `?` inside the app for the key cheat sheet.
 
 ## Keys
 
@@ -75,7 +78,7 @@ mrkdup [directory]   # defaults to the current directory
 | tree | + | zoom in: make the selected folder the tree root (a file: its folder) |
 | tree | . | toggle hidden files (dotfiles and anything matched by `.gitignore`) |
 | tree | ? | show the key cheat sheet (the launch page) over the editor; any key closes it |
-| tree | s | settings popup: h/l or ←/→ cycle the selected setting — theme, side padding (applies live and is written to the config file); j/k pick the row; Esc, Enter, or s closes. Mouse: click a row to pick it, click its ‹ / › to cycle, click outside the popup to close |
+| tree | s | settings popup: h/l or ←/→ cycle the selected setting — `theme`, `side_padding`, `cursor_shape`, `cursor_blink`, `cursor_color` (applies live and is written to the config file); j/k pick the row; Esc, Enter, or s closes. Mouse: click a row to pick it, click its ‹ / › to cycle, click outside the popup to close |
 | editor | Ctrl+S | save (after a disk-conflict warning, a second Ctrl+S overwrites) |
 | editor | Ctrl+Z / Ctrl+Y | undo / redo |
 | editor | Ctrl+D | toggle checkbox on the line (`- [ ]` ↔ `- [x]`, `- [X]` → `- [ ]`; other lines gain a `- [ ] ` prefix; Ctrl+Z twice undoes) |
@@ -129,7 +132,9 @@ clamped into the ranges below.
 # ~/.config/mrkdup/config
 tree_width = 30
 side_margin_percent = 5
+top_margin_percent = 3
 autosave_seconds = 10
+tree_refresh_seconds = 2
 side_padding = 1
 # default | light | mono | firmitas | tokyonight
 theme = default
