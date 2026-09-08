@@ -253,3 +253,5 @@ Keybindings are not remappable.
   counts as a conflict too: the first save warns instead of silently
   recreating the file — confirm with a second Ctrl+S to recreate it.
 - Line endings are preserved: CRLF files stay CRLF, LF files stay LF.
+- Files are normalized to end with exactly one trailing newline on save:
+  a file without one gains one on first save. This is intentional.

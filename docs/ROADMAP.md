@@ -109,7 +109,7 @@ Correctness / edge cases:
   (`src/editor.rs`), so a dirty buffer whose file was deleted elsewhere
   saves without the usual conflict warning and silently recreates it.
   Decide: missing disk file should count as changed.
-- [ ] Document the trailing-newline normalization. `Editor::content`
+- [x] Document the trailing-newline normalization. `Editor::content`
   always appends a final newline (`src/editor.rs`), so a file without
   one gains one on first save. Likely intentional — say so in the
   `## Saving model` README section.
