@@ -135,7 +135,7 @@ Docs drift:
 - [x] Fix stale `theme_name` doc comment (`src/config.rs`): says
   "(`default`, `light`, `mono`)" but there are five builtins
   (`firmitas`, `tokyonight` included). README is already correct.
-- [ ] Clarify the README config example. The `ini` sample shows
+- [x] Clarify the README config example. The `ini` sample shows
   non-default values (`autosave_seconds = 10`, `cursor_shape = block`,
   `cursor_blink = off`, `cursor_color = orange`) directly above the
   defaults table (`2` / `default` / `on` / `default`). Add a comment

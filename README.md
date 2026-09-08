@@ -136,6 +136,7 @@ clamped into the ranges below.
 
 ```ini
 # ~/.config/mrkdup/config
+# (example values, not the defaults — see the table below)
 tree_width = 30
 side_margin_percent = 5
 top_margin_percent = 3
