@@ -12,6 +12,9 @@ use crate::tab::{self, Part, Segment, Tab};
 use crate::theme::Theme;
 use crate::tree::Tree;
 
+/// Status-bar error for edit operations attempted with no file open.
+const NO_FILE_OPEN: &str = "no file open — pick one in the tree (Esc)";
+
 pub enum Focus {
     Tree,
     Editor,
@@ -191,14 +194,23 @@ impl App {
         self.tabs.get_mut(self.active)
     }
 
-    /// The active tab's editor. Only for paths that have already checked
-    /// a file is open (`editor_key` and friends); panics otherwise.
-    fn ed(&mut self) -> &mut Editor {
-        &mut self.tabs[self.active].editor
+    /// The active tab's editor, or `None` when no file is open.
+    /// Callers show [`NO_FILE_OPEN`] in the status bar instead of
+    /// panicking — every edit path must stay total even if a guard is
+    /// missed in the future.
+    fn ed(&mut self) -> Option<&mut Editor> {
+        self.tabs.get_mut(self.active).map(|tab| &mut tab.editor)
     }
 
-    fn ed_ref(&self) -> &Editor {
-        &self.tabs[self.active].editor
+    /// Read-only view of the active tab's editor, or `None` when no
+    /// file is open.
+    fn ed_ref(&self) -> Option<&Editor> {
+        self.tabs.get(self.active).map(|tab| &tab.editor)
+    }
+
+    /// Tell the user an edit needed a file and none is open.
+    fn no_file_status(&mut self) {
+        self.status = Some(NO_FILE_OPEN.into());
     }
 
     /// Test shorthand for the active tab's editor.
@@ -330,8 +342,16 @@ impl App {
                     }
                 } else if let Some(area) = self.editor_area.filter(|a| contains(*a, x, y)) {
                     self.focus = Focus::Editor;
-                    let (row, col) = self.editor_hit(area, x, y);
-                    let tab = &mut self.tabs[self.active];
+                    let Some((row, col)) = self.editor_hit(area, x, y) else {
+                        // a stale pane rect with no file open
+                        self.no_file_status();
+                        return;
+                    };
+                    // `editor_hit` succeeded, so a tab is open; the
+                    // fallback only guards against a future missed check
+                    let Some(tab) = self.tabs.get_mut(self.active) else {
+                        return;
+                    };
                     tab.follow_cursor = true;
                     tab.editor.cancel_selection();
                     tab.editor.set_cursor(row, col);
@@ -347,21 +367,33 @@ impl App {
             }
             MouseEventKind::Drag(MouseButton::Left) if self.dragging => {
                 if let Some(area) = self.editor_area {
-                    let (row, col) = self.editor_hit(area, x, y);
-                    let tab = &mut self.tabs[self.active];
+                    let Some((row, col)) = self.editor_hit(area, x, y) else {
+                        // a stale pane rect with no file open
+                        self.no_file_status();
+                        return;
+                    };
+                    // `editor_hit` succeeded, so a tab is open; the
+                    // fallback only guards against a future missed check
+                    let Some(tab) = self.tabs.get_mut(self.active) else {
+                        return;
+                    };
                     tab.follow_cursor = true;
                     tab.editor.set_cursor(row, col);
                 }
             }
             MouseEventKind::Up(MouseButton::Left) if self.dragging => {
                 self.dragging = false;
-                match self.ed_ref().selected_text() {
+                match self.ed_ref().and_then(|ed| ed.selected_text()) {
                     Some(text) => {
                         self.status = Some("copied to clipboard".into());
                         self.clipboard = Some(text);
                     }
                     // a plain click: no selection to keep
-                    None => self.ed().cancel_selection(),
+                    None => match self.ed() {
+                        Some(ed) => ed.cancel_selection(),
+                        // the drag began before the last tab closed
+                        None => self.no_file_status(),
+                    },
                 }
             }
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
@@ -370,7 +402,11 @@ impl App {
                     // scroll the view, not the cursor; the renderer clamps
                     // to the last row and stops following the cursor
                     // until the next key or click
-                    let tab = &mut self.tabs[self.active];
+                    let Some(tab) = self.tabs.get_mut(self.active) else {
+                        // a stale pane rect with no file open
+                        self.no_file_status();
+                        return;
+                    };
                     tab.scroll = if up {
                         tab.scroll.saturating_sub(3)
                     } else {
@@ -432,8 +468,8 @@ impl App {
     /// resolves to the row just above the visible window and below it to
     /// the row just under, so a drag past either edge scrolls one row
     /// per event; left/right of it snap to the row's ends.
-    fn editor_hit(&mut self, area: Rect, x: u16, y: u16) -> (usize, usize) {
-        let tab = &mut self.tabs[self.active];
+    fn editor_hit(&mut self, area: Rect, x: u16, y: u16) -> Option<(usize, usize)> {
+        let tab = self.tabs.get_mut(self.active)?;
         let file_kind = crate::highlight::file_kind(tab.editor.path.as_deref());
         let scroll = tab.scroll;
         let height = area.height as usize;
@@ -447,7 +483,7 @@ impl App {
         let xcell = x.saturating_sub(area.x) as usize;
         let (lines, cache) = tab.editor.render_parts();
         let (rows, _) = cache.ensure(lines, area.width as usize, file_kind);
-        crate::wrap::hit_test(rows, lines, vrow, xcell)
+        Some(crate::wrap::hit_test(rows, lines, vrow, xcell))
     }
 
     fn tree_key(&mut self, key: KeyEvent) {
@@ -843,12 +879,15 @@ impl App {
         if self.tabs.is_empty() {
             match key.code {
                 KeyCode::Esc | KeyCode::BackTab => self.focus = Focus::Tree,
-                _ => self.status = Some("no file open — pick one in the tree (Esc)".into()),
+                _ => self.no_file_status(),
             }
             return;
         }
         // any key brings the view back to the cursor after a wheel scroll
-        self.tabs[self.active].follow_cursor = true;
+        // (the guard above means a tab is open; never panic if it isn't)
+        if let Some(tab) = self.tabs.get_mut(self.active) {
+            tab.follow_cursor = true;
+        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match (ctrl, key.code) {
             // Shift+Tab arrives as BackTab; treat it like Esc
@@ -859,10 +898,14 @@ impl App {
             // crate defaults make Ctrl+K kill-to-end-of-line; we use
             // Ctrl+J/Ctrl+K as word motions instead
             (true, KeyCode::Char('j')) => {
-                self.ed().move_cursor(CursorMove::WordForward);
+                if let Some(ed) = self.ed() {
+                    ed.move_cursor(CursorMove::WordForward);
+                }
             }
             (true, KeyCode::Char('k')) => {
-                self.ed().move_cursor(CursorMove::WordBack);
+                if let Some(ed) = self.ed() {
+                    ed.move_cursor(CursorMove::WordBack);
+                }
             }
             (true, KeyCode::Char('g')) => {
                 if self.last_search.is_empty() {
@@ -875,12 +918,12 @@ impl App {
             // crate defaults are Ctrl+U/Ctrl+R with Ctrl+Y = paste;
             // intercept so the advertised keys work
             (true, KeyCode::Char('z')) => {
-                if self.ed().undo() {
+                if self.ed().is_some_and(|ed| ed.undo()) {
                     self.note_edit();
                 }
             }
             (true, KeyCode::Char('y')) => {
-                if self.ed().redo() {
+                if self.ed().is_some_and(|ed| ed.redo()) {
                     self.note_edit();
                 }
             }
@@ -903,7 +946,9 @@ impl App {
                 } else {
                     CursorMove::ParagraphBack
                 };
-                self.ed().move_cursor(mv);
+                if let Some(ed) = self.ed() {
+                    ed.move_cursor(mv);
+                }
             }
             // typing "--0" expands to a markdown checkbox "- [ ] "
             (false, KeyCode::Char('0'))
@@ -912,14 +957,21 @@ impl App {
                     .intersects(KeyModifiers::ALT | KeyModifiers::SUPER)
                     && self.checkbox_trigger_armed() =>
             {
-                let ed = self.ed();
+                let Some(ed) = self.ed() else {
+                    self.no_file_status();
+                    return;
+                };
                 ed.delete_char(); // the two dashes
                 ed.delete_char();
                 ed.insert_str("- [ ] ");
                 self.note_edit();
             }
             _ => {
-                if self.ed().input(Input::from(key)) {
+                let Some(ed) = self.ed() else {
+                    self.no_file_status();
+                    return;
+                };
+                if ed.input(Input::from(key)) {
                     self.note_edit();
                 }
             }
@@ -934,7 +986,10 @@ impl App {
     fn toggle_checkbox(&mut self) {
         // an active selection would make the moves below extend it and
         // delete_line_by_end would then eat the whole selection
-        let ed = self.ed();
+        let Some(ed) = self.ed() else {
+            self.no_file_status();
+            return;
+        };
         ed.cancel_selection();
         let (row, col) = ed.cursor();
         let Some(old) = ed.current_line().map(str::to_string) else {
@@ -957,15 +1012,21 @@ impl App {
     /// True when the two chars before the cursor are exactly "--"
     /// (not part of a longer dash run).
     fn checkbox_trigger_armed(&self) -> bool {
-        let (_, col) = self.ed_ref().cursor();
-        let Some(line) = self.ed_ref().current_line() else {
+        let Some(ed) = self.ed_ref() else {
+            return false;
+        };
+        let (_, col) = ed.cursor();
+        let Some(line) = ed.current_line() else {
             return false;
         };
         crate::checkbox::trigger_armed(line, col)
     }
 
     fn note_edit(&mut self) {
-        let tab = &mut self.tabs[self.active];
+        let Some(tab) = self.tabs.get_mut(self.active) else {
+            self.no_file_status();
+            return;
+        };
         // the highlighted matches are stale once the text changes
         tab.search_highlight = None;
         tab.editor.mark_dirty();
@@ -975,7 +1036,10 @@ impl App {
     }
 
     fn do_save(&mut self) {
-        let tab = &mut self.tabs[self.active];
+        let Some(tab) = self.tabs.get_mut(self.active) else {
+            self.no_file_status();
+            return;
+        };
         let force = tab.force_next_save;
         match tab.editor.save(force) {
             Ok(SaveOutcome::Saved) => {
@@ -1189,7 +1253,10 @@ impl App {
         if query.is_empty() {
             return;
         }
-        let tab = &mut self.tabs[self.active];
+        let Some(tab) = self.tabs.get_mut(self.active) else {
+            self.no_file_status();
+            return;
+        };
         tab.follow_cursor = true;
         // the renderer highlights every (case-insensitive) match of this
         tab.search_highlight = Some(query.to_string());

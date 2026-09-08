@@ -123,7 +123,7 @@ Hardening (not defects):
   `.NAME.mrkdup-tmp` name collides on concurrent saves of the same path
   and litters a dotfile after a crash; no directory fsync after rename,
   so the rename itself can be lost on some filesystems after a crash.
-- [ ] Replace direct tab indexing with a graceful error. `ed()` /
+- [x] Replace direct tab indexing with a graceful error. `ed()` /
   `ed_ref()` index `self.tabs[self.active]` (`src/app.rs`) and panic if
   no file is open; every current caller guards first, but a status-bar
   error would fit the "never crash on bad input" ethos better than a

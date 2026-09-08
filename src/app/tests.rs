@@ -1784,3 +1784,103 @@ fn settings_popup_ignores_clicks_before_its_first_draw() {
     app.handle_mouse(down(2, 2));
     assert!(matches!(app.prompt, Prompt::Settings { .. }));
 }
+
+// ---- no file open: status-bar errors, never panics ------------------
+//
+// `ed` / `ed_ref` and the tab helpers used to index
+// `tabs[active]` directly; with no file open that panicked. Now every
+// such path reports `NO_FILE_OPEN` in the status bar instead.
+
+/// The user-visible error every no-tab path must show.
+const NO_FILE: &str = "no file open — pick one in the tree (Esc)";
+
+#[test]
+fn editor_helpers_report_no_tab_instead_of_panicking() {
+    let mut app = App::new(fixture("no-tab-helpers"), Config::default()).unwrap();
+    assert!(app.tabs.is_empty());
+    assert!(app.ed().is_none());
+    assert!(app.ed_ref().is_none());
+    // the checkbox predicate answers instead of panicking
+    assert!(!app.checkbox_trigger_armed());
+    assert!(app.status.is_none());
+}
+
+#[test]
+fn toggle_checkbox_with_no_file_open_errors() {
+    let mut app = App::new(fixture("no-tab-checkbox"), Config::default()).unwrap();
+    app.toggle_checkbox();
+    assert!(app.tabs.is_empty());
+    assert_eq!(app.status.as_deref(), Some(NO_FILE));
+}
+
+#[test]
+fn save_with_no_file_open_errors() {
+    let mut app = App::new(fixture("no-tab-save"), Config::default()).unwrap();
+    app.do_save();
+    assert!(app.tabs.is_empty());
+    assert_eq!(app.status.as_deref(), Some(NO_FILE));
+}
+
+#[test]
+fn search_with_no_file_open_errors_and_leaves_no_trace() {
+    let mut app = App::new(fixture("no-tab-search"), Config::default()).unwrap();
+    app.search_next("hello");
+    assert!(app.tabs.is_empty());
+    assert_eq!(app.status.as_deref(), Some(NO_FILE));
+    assert!(app.last_search.is_empty());
+}
+
+#[test]
+fn note_edit_with_no_file_open_errors() {
+    let mut app = App::new(fixture("no-tab-note"), Config::default()).unwrap();
+    app.note_edit();
+    assert!(app.tabs.is_empty());
+    assert_eq!(app.status.as_deref(), Some(NO_FILE));
+}
+
+#[test]
+fn editor_hit_with_no_file_open_is_none() {
+    let mut app = App::new(fixture("no-tab-hit"), Config::default()).unwrap();
+    assert!(app.editor_hit(Rect::new(32, 1, 40, 8), 35, 2).is_none());
+    assert!(app.status.is_none());
+}
+
+/// A click landing in a stale editor rect (recorded before the last
+/// tab closed) errors instead of panicking.
+#[test]
+fn click_in_a_stale_editor_rect_with_no_file_open_errors() {
+    let mut app = App::new(fixture("no-tab-click"), Config::default()).unwrap();
+    app.editor_area = Some(Rect::new(32, 1, 40, 8));
+    app.handle_mouse(down(35, 2));
+    assert!(app.tabs.is_empty());
+    assert_eq!(app.status.as_deref(), Some(NO_FILE));
+    // the release finds no drag in progress and does nothing
+    app.handle_mouse(up(35, 2));
+    assert_eq!(app.status.as_deref(), Some(NO_FILE));
+    assert!(app.clipboard.is_none());
+}
+
+/// A drag begun before the last tab closed errors on move and on
+/// release instead of panicking.
+#[test]
+fn drag_and_release_with_no_file_open_error() {
+    let mut app = App::new(fixture("no-tab-drag"), Config::default()).unwrap();
+    app.editor_area = Some(Rect::new(32, 1, 40, 8));
+    app.dragging = true;
+    app.handle_mouse(drag(35, 2));
+    assert_eq!(app.status.as_deref(), Some(NO_FILE));
+    app.dragging = true;
+    app.handle_mouse(up(35, 2));
+    assert!(!app.dragging);
+    assert_eq!(app.status.as_deref(), Some(NO_FILE));
+    assert!(app.clipboard.is_none());
+}
+
+#[test]
+fn wheel_over_a_stale_editor_rect_with_no_file_open_errors() {
+    let mut app = App::new(fixture("no-tab-wheel"), Config::default()).unwrap();
+    app.editor_area = Some(Rect::new(32, 1, 40, 8));
+    app.handle_mouse(mouse(MouseEventKind::ScrollDown, 40, 3));
+    assert!(app.tabs.is_empty());
+    assert_eq!(app.status.as_deref(), Some(NO_FILE));
+}
