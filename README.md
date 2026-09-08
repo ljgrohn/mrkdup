@@ -249,4 +249,7 @@ Keybindings are not remappable.
 - If a file changed on disk while your buffer is clean, it reloads
   silently. If your buffer is dirty, mrkdup refuses to clobber the disk
   and asks you to confirm with a second Ctrl+S.
+- If the file was deleted on disk while your buffer is dirty, that
+  counts as a conflict too: the first save warns instead of silently
+  recreating the file — confirm with a second Ctrl+S to recreate it.
 - Line endings are preserved: CRLF files stay CRLF, LF files stay LF.

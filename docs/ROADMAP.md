@@ -104,7 +104,7 @@ live in `docs/superpowers/plans/`.
 
 Correctness / edge cases:
 
-- [ ] Treat deleted-on-disk as a conflict, not a clean save.
+- [x] Treat deleted-on-disk as a conflict, not a clean save.
   `disk_changed` returns `false` when either mtime is missing
   (`src/editor.rs`), so a dirty buffer whose file was deleted elsewhere
   saves without the usual conflict warning and silently recreates it.

@@ -89,6 +89,21 @@ fn external_change_while_dirty_blocks_save_then_force_wins() {
 }
 
 #[test]
+fn deleted_on_disk_while_dirty_is_a_conflict_not_a_silent_recreate() {
+    let p = tmpfile("deleted-conflict", "x\n");
+    let mut ed = Editor::new();
+    ed.open(&p).unwrap();
+    ed.textarea.insert_str("mine ");
+    ed.mark_dirty();
+    fs::remove_file(&p).unwrap();
+    assert!(matches!(ed.save(false).unwrap(), SaveOutcome::Conflict));
+    assert!(!p.exists()); // not silently recreated
+    assert!(ed.dirty); // buffer preserved for the confirmed second save
+    assert!(matches!(ed.save(true).unwrap(), SaveOutcome::Saved));
+    assert_eq!(fs::read_to_string(&p).unwrap(), "mine x\n");
+}
+
+#[test]
 fn external_change_while_clean_reloads() {
     let p = tmpfile("reload", "x\n");
     let mut ed = Editor::new();

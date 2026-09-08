@@ -253,6 +253,10 @@ impl Editor {
     fn disk_changed(&self, path: &Path) -> bool {
         match (self.mtime, disk_mtime(path)) {
             (Some(a), Some(b)) => a != b,
+            // The file was stat'ed at open but is gone now (deleted
+            // elsewhere): count it as changed so a dirty buffer takes
+            // the conflict path instead of silently recreating it.
+            (Some(_), None) => true,
             _ => false,
         }
     }
