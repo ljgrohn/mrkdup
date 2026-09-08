@@ -1,6 +1,6 @@
 {
   "name": "mrkdup",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A terminal markdown editor with a file tree and soft wrap (prebuilt binary wrapper)",
   "license": "MIT",
   "repository": {
