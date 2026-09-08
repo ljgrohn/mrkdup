@@ -51,6 +51,12 @@ mrkdup --version | -V     # print the version
 mrkdup --help | -h        # usage
 ```
 
+At most one `directory` is accepted — anything more is an error that
+prints the usage to stderr and exits nonzero. The `--help`/`-h` and
+`--version`/`-V` flags are recognized in any position, so
+`mrkdup somedir --help` still prints the usage instead of opening
+`somedir`.
+
 Press `?` inside the app for the key cheat sheet.
 
 ## Keys

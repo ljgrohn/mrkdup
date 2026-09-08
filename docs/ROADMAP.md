@@ -113,7 +113,7 @@ Correctness / edge cases:
   always appends a final newline (`src/editor.rs`), so a file without
   one gains one on first save. Likely intentional — say so in the
   `## Saving model` README section.
-- [ ] Reject trailing CLI args. `main` only inspects `args().nth(1)`
+- [x] Reject trailing CLI args. `main` only inspects `args().nth(1)`
   (`src/main.rs`), so `mrkdup dir extra` silently ignores `extra` and
   `--help` after a directory is treated as a path.
 

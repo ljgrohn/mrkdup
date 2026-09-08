@@ -1,4 +1,5 @@
 mod app;
+mod args;
 mod checkbox;
 mod clipboard;
 mod config;
@@ -19,7 +20,6 @@ mod wrap;
 
 use std::env;
 use std::io;
-use std::path::PathBuf;
 use std::time::Duration;
 
 use crossterm::event::{
@@ -38,17 +38,23 @@ Usage: mrkdup [directory]        open the tree at directory (default: .)
 Keys: press ? inside the app for the cheat sheet.";
 
 fn main() -> io::Result<()> {
-    let root = match env::args().nth(1).as_deref() {
-        Some("--version" | "-V") => {
-            println!("mrkdup {}", env!("CARGO_PKG_VERSION"));
-            return Ok(());
-        }
-        Some("--help" | "-h") => {
+    let root = match args::parse(env::args().skip(1)) {
+        Ok(args::Action::Help) => {
             println!("{USAGE}");
             return Ok(());
         }
-        Some(p) => PathBuf::from(p),
-        None => env::current_dir()?,
+        Ok(args::Action::Version) => {
+            println!("mrkdup {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+        Ok(args::Action::Run { root }) => match root {
+            Some(p) => p,
+            None => env::current_dir()?,
+        },
+        Err(err) => {
+            eprintln!("error: {err}\n\n{USAGE}");
+            std::process::exit(2);
+        }
     };
     let (config, mut warnings) = config::load();
     let (theme, theme_warnings) = theme::load(&config.theme_name);
