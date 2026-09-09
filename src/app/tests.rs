@@ -2257,3 +2257,18 @@ fn ctrl_o_heading_link_to_an_unopenable_file_keeps_the_source_cursor() {
         app.status
     );
 }
+
+#[test]
+fn ctrl_o_heading_link_skips_body_text_that_mentions_the_heading() {
+    let root = link_vault("headbody", "see [[b#Second]]\n");
+    fs::write(
+        root.join("notes/b.md"),
+        "# First\nthe second part is below\n## Second\nbody\n",
+    )
+    .unwrap();
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(app.editor().cursor(), (2, 0)); // the `## Second` line
+    assert_eq!(app.status, None);
+}

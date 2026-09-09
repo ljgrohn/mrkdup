@@ -92,7 +92,10 @@ pub fn wikilinks(line: &str) -> Vec<WikiLink> {
         out.push(WikiLink {
             target: text(inner, target_end),
             alias: s.pipe.map(|p| text(p + 1, s.close)),
-            heading: s.hash.map(|h| text(h + 1, pre_end)),
+            heading: s
+                .hash
+                .map(|h| text(h + 1, pre_end))
+                .filter(|h| !h.is_empty()),
             start: i,
             end: s.close + 2,
         });
@@ -285,6 +288,33 @@ pub(crate) fn scan_backlinks(root: &Path, show_hidden: bool, stem: &str) -> Vec<
     }
     out.sort();
     out
+}
+
+/// `s` as a heading anchor: trimmed, lower-cased, spaces as `-`, only
+/// letters, digits and `-` kept — so `Next Steps` and the GitHub-style
+/// `next-steps` compare equal.
+fn slug(s: &str) -> String {
+    s.trim()
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '-')
+        .map(|c| if c == ' ' { '-' } else { c })
+        .collect()
+}
+
+/// The row of the ATX heading (`#` .. `######` then a space) whose text
+/// slugs equal to `heading`, or `None` — including for an empty
+/// `heading`. Only heading lines count, so `[[note#Intro]]` never lands
+/// on a body sentence that mentions the intro.
+pub fn heading_row(lines: &[String], heading: &str) -> Option<usize> {
+    let want = slug(heading);
+    if want.is_empty() {
+        return None;
+    }
+    lines.iter().position(|l| {
+        let hashes = l.chars().take_while(|&c| c == '#').count();
+        (1..=6).contains(&hashes) && l[hashes..].starts_with(' ') && slug(&l[hashes..]) == want
+    })
 }
 
 #[cfg(test)]

@@ -1447,15 +1447,13 @@ impl App {
         };
     }
 
-    /// After following a `[[t#H]]` link: land on the first line
-    /// containing `H` (case-insensitive), or note the miss.
+    /// After following a `[[t#H]]` link (or a `path#H` markdown link):
+    /// land on the heading `H` (`links::heading_row`), or note the miss.
     fn jump_to_heading(&mut self, heading: &str) {
-        let row = self.tabs.get(self.active).and_then(|tab| {
-            tab.editor
-                .lines()
-                .iter()
-                .position(|l| crate::search::find_ci(l, heading, 0).is_some())
-        });
+        let row = self
+            .tabs
+            .get(self.active)
+            .and_then(|tab| crate::links::heading_row(tab.editor.lines(), heading));
         match row {
             Some(r) => {
                 if let Some(tab) = self.tabs.get_mut(self.active) {

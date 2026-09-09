@@ -257,3 +257,31 @@ fn dots_in_a_note_name_are_not_an_extension() {
         Path::new("/vault/notes/photo.png")
     );
 }
+
+#[test]
+fn heading_row_matches_headings_only_by_slug() {
+    let lines: Vec<String> = [
+        "see the introduction below",
+        "",
+        "## Introduction",
+        "### Next Steps",
+        "#not a heading",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    assert_eq!(heading_row(&lines, "Introduction"), Some(2));
+    assert_eq!(heading_row(&lines, "introduction"), Some(2));
+    assert_eq!(heading_row(&lines, "next-steps"), Some(3));
+    assert_eq!(heading_row(&lines, " Next Steps "), Some(3));
+    assert_eq!(heading_row(&lines, "not a heading"), None);
+    assert_eq!(heading_row(&lines, "missing"), None);
+    assert_eq!(heading_row(&lines, ""), None);
+}
+
+#[test]
+fn an_empty_heading_is_no_heading() {
+    let w = parse_wikilink_at("see [[b#]] x", 6).unwrap();
+    assert_eq!(w.target, "b");
+    assert_eq!(w.heading, None);
+}
