@@ -285,3 +285,35 @@ fn an_empty_heading_is_no_heading() {
     assert_eq!(w.target, "b");
     assert_eq!(w.heading, None);
 }
+
+#[test]
+fn md_url_splits_fragment_and_decodes_percent_escapes() {
+    assert_eq!(
+        split_md_url("spec.md#goals"),
+        ("spec.md".into(), Some("goals".into()))
+    );
+    assert_eq!(split_md_url("spec.md#"), ("spec.md".into(), None));
+    assert_eq!(split_md_url("#goals"), ("".into(), Some("goals".into())));
+    assert_eq!(split_md_url("my%20note.md"), ("my note.md".into(), None));
+    assert_eq!(percent_decode("caf%C3%A9.md"), "café.md");
+    // malformed escapes stay literal
+    assert_eq!(percent_decode("100%.md"), "100%.md");
+    assert_eq!(percent_decode("a%zzb"), "a%zzb");
+}
+
+#[test]
+fn remote_urls_are_any_scheme_or_mailto() {
+    for url in [
+        "https://x",
+        "http://x",
+        "ftp://x",
+        "file:///x",
+        "MAILTO:a@b",
+        "mailto:a@b",
+    ] {
+        assert!(is_remote_url(url), "{url}");
+    }
+    for url in ["notes/a.md", "/a.md", "../a.md", "#h", "a:b.md"] {
+        assert!(!is_remote_url(url), "{url}");
+    }
+}

@@ -2288,3 +2288,53 @@ fn ctrl_o_heading_link_into_a_scrolled_tab_follows_the_cursor_again() {
     assert!(app.tab().unwrap().follow_cursor);
     assert_eq!(app.editor().cursor(), (0, 0));
 }
+
+#[test]
+fn ctrl_o_md_link_with_fragment_opens_and_jumps_to_the_heading() {
+    let root = link_vault("mdfrag", "see [t](../sib/c.md#sea-side)\n");
+    fs::write(root.join("sib/c.md"), "intro\n## Sea Side\nbody\n").unwrap();
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "../sib", 1);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("sib/c.md").as_path())
+    );
+    assert_eq!(app.editor().cursor(), (1, 0));
+}
+
+#[test]
+fn ctrl_o_md_link_decodes_percent_escapes() {
+    let root = link_vault("mdpct", "see [t](my%20note.md)\n");
+    fs::write(root.join("notes/my note.md"), "spaced\n").unwrap();
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "my%20", 1);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("notes/my note.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_o_fragment_only_link_jumps_within_the_file() {
+    let root = link_vault("mdanchor", "see [t](#below)\nfiller\n## Below\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "#below", 1);
+    app.handle_key(ctrl('o'));
+    assert_eq!(app.tabs.len(), 1);
+    assert_eq!(app.editor().cursor(), (2, 0));
+}
+
+#[test]
+fn ctrl_o_refuses_any_remote_scheme() {
+    let root = link_vault("mdftp", "see [t](ftp://x/y.md)\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "ftp://", 1);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.status.as_deref(),
+        Some("not a local file — ftp://x/y.md")
+    );
+    assert_eq!(app.tabs.len(), 1);
+}

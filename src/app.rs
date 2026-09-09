@@ -1382,27 +1382,33 @@ impl App {
         }
     }
 
-    /// Open a local `[text](url)` target the same way wikilinks
-    /// resolve; absolute `/...` paths anchor at the tree root
-    /// (handled inside `resolve`). Remote urls and `#anchor`-only
-    /// fragments are refused with a status message, and unlike
+    /// Open a local `[text](url)` target the same way wikilinks resolve
+    /// (`resolve` handles the leading `/`), then jump to its `#fragment`
+    /// heading if any; a bare `#fragment` jumps inside the current
+    /// file. Remote urls are refused with a status message, and unlike
     /// wikilinks a miss never offers creation — it just reports.
     fn follow_md_url(&mut self, root: &std::path::Path, file_dir: &std::path::Path, url: &str) {
-        if url.starts_with("http://")
-            || url.starts_with("https://")
-            || url.starts_with("mailto:")
-            || url.starts_with('#')
-        {
+        if crate::links::is_remote_url(url) {
             self.status = Some(format!("not a local file — {url}"));
             return;
         }
-        let exists = |p: &std::path::Path| p.is_file();
-        let hit = crate::links::resolve(url, file_dir, root, &exists);
-        match hit {
-            Some(path) => {
-                self.open_file(crate::fsutil::canonical(path));
+        let (path, fragment) = crate::links::split_md_url(url);
+        let opened = if path.is_empty() && fragment.is_some() {
+            true // `#heading` alone: stay in this file
+        } else {
+            let exists = |p: &std::path::Path| p.is_file();
+            match crate::links::resolve(&path, file_dir, root, &exists) {
+                Some(p) => self.open_file(crate::fsutil::canonical(p)),
+                None => {
+                    self.status = Some(format!("no file '{url}'"));
+                    false
+                }
             }
-            None => self.status = Some(format!("no file '{url}'")),
+        };
+        if opened {
+            if let Some(h) = fragment {
+                self.jump_to_heading(&h);
+            }
         }
     }
 

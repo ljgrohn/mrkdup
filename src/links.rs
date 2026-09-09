@@ -317,5 +317,51 @@ pub fn heading_row(lines: &[String], heading: &str) -> Option<usize> {
     })
 }
 
+/// True for anything with a scheme (`://` anywhere) or a `mailto:`
+/// prefix, case-insensitively. Everything else is treated as a local
+/// path.
+pub fn is_remote_url(url: &str) -> bool {
+    url.contains("://") || url.to_ascii_lowercase().starts_with("mailto:")
+}
+
+/// Split a markdown link url into (percent-decoded path, fragment). The
+/// fragment is the text after the first `#`, without the `#`; `None`
+/// when there is none or it is empty. `[t](#heading)` yields an empty
+/// path.
+pub fn split_md_url(url: &str) -> (String, Option<String>) {
+    let (path, fragment) = match url.split_once('#') {
+        Some((p, f)) => (p, Some(f).filter(|f| !f.is_empty())),
+        None => (url, None),
+    };
+    (percent_decode(path), fragment.map(str::to_string))
+}
+
+/// `%XX` escapes decoded as bytes, then read as UTF-8; anything that is
+/// not two hex digits after a `%`, or does not form valid UTF-8, is
+/// kept as written.
+pub fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = bytes
+            .get(i + 1..i + 3)
+            .filter(|h| bytes[i] == b'%' && h.iter().all(u8::is_ascii_hexdigit))
+            .and_then(|h| std::str::from_utf8(h).ok())
+            .and_then(|h| u8::from_str_radix(h, 16).ok());
+        match hex {
+            Some(b) => {
+                out.push(b);
+                i += 3;
+            }
+            None => {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8(out).unwrap_or_else(|_| s.to_string())
+}
+
 #[cfg(test)]
 mod tests;
