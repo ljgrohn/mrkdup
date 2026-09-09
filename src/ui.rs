@@ -439,6 +439,7 @@ fn key_lines() -> Vec<Line<'static>> {
         ("?", "help"),
         ("s", "settings"),
         ("Ctrl+W", "close tab"),
+        ("Ctrl+O", "follow link under cursor"),
         ("Opt+H / Opt+L", "prev / next tab"),
         ("q", "quit"),
     ];
@@ -448,12 +449,10 @@ fn key_lines() -> Vec<Line<'static>> {
 }
 
 /// The cheat sheet, shown centered and dim in the editor pane until the
-/// first file opens.
+/// first file opens. No blank line under the title: the sheet is
+/// exactly as tall as a small terminal fits, so every row counts.
 fn draw_welcome(f: &mut Frame, area: Rect, theme: &Theme) {
-    let mut lines = vec![
-        Line::from("mrkdup").alignment(Alignment::Center),
-        Line::from(""),
-    ];
+    let mut lines = vec![Line::from("mrkdup").alignment(Alignment::Center)];
     lines.extend(key_lines());
     let width = lines.iter().map(|l| l.width()).max().unwrap_or(0) as u16;
     let rect = centered_rect(width, lines.len() as u16, area);

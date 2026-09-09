@@ -266,6 +266,45 @@ fn mixed_endings_first_line_terminator_wins_crlf() {
     );
 }
 
+/// Task 3 contract: `cursor()` cols are char indices straight into
+/// `lines()[row]`, so `links::parse_wikilink_at` takes them as-is.
+/// textarea 0.9's `DataCursor` is character-wise (not display width),
+/// and this test pins that with multibyte text on both sides of the
+/// brackets. If it ever fails, `follow_link_under_cursor` needs a
+/// width→char conversion helper (in `links.rs`, tested here) instead
+/// of passing the col through.
+#[test]
+fn cursor_col_is_a_char_index_the_wikilink_parser_accepts() {
+    let mut ed = Editor::new();
+    // "type" the line so the cursor moves the way real typing moves it
+    ed.insert_str("héllo [[wörld]]");
+    let line = "héllo [[wörld]]";
+    assert_eq!(ed.lines(), [line]);
+    // char layout: h0 é1 l2 l3 o4 sp5 [6 [7 w8 ö9 r10 l11 d12 ]13 ]14
+    for (col, ch) in [(7, '['), (8, 'w'), (9, 'ö'), (13, ']'), (14, ']')] {
+        assert!(ed.set_cursor(0, col));
+        assert_eq!(ed.cursor(), (0, col));
+        assert_eq!(line.chars().nth(col), Some(ch));
+        assert!(
+            crate::links::parse_wikilink_at(line, col).is_some(),
+            "col {col} over the wikilink must parse"
+        );
+    }
+    // outside the brackets the same cols parse as nothing
+    for col in [0, 1, 5] {
+        assert!(ed.set_cursor(0, col));
+        assert_eq!(ed.cursor(), (0, col));
+        assert!(crate::links::parse_wikilink_at(line, col).is_none());
+    }
+    // the multibyte target itself survives the round trip
+    ed.set_cursor(0, 8);
+    let (_, col) = ed.cursor();
+    assert_eq!(
+        crate::links::parse_wikilink_at(line, col).unwrap().target,
+        "wörld"
+    );
+}
+
 #[test]
 fn selected_text_spans_lines_and_is_none_when_empty() {
     let mut ed = Editor::new();

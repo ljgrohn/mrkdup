@@ -1884,3 +1884,144 @@ fn wheel_over_a_stale_editor_rect_with_no_file_open_errors() {
     assert!(app.tabs.is_empty());
     assert_eq!(app.status.as_deref(), Some(NO_FILE));
 }
+
+/// Task 3 (Ctrl+O follow-link) fixtures: a vault with a subdirectory,
+/// so sibling-dir vs root fallback resolution is exercisable.
+fn link_vault(tag: &str, a_content: &str) -> std::path::PathBuf {
+    let owned = std::env::temp_dir().join(format!("mrkdup-link-{tag}"));
+    let _ = fs::remove_dir_all(&owned);
+    let root = owned.join("root");
+    fs::create_dir_all(root.join("notes")).unwrap();
+    fs::create_dir_all(root.join("sib")).unwrap();
+    fs::write(root.join("notes/a.md"), a_content).unwrap();
+    fs::write(root.join("notes/b.md"), "# Target Head\nbody\n").unwrap();
+    fs::write(root.join("shared.md"), "shared\n").unwrap();
+    fs::write(root.join("sib/c.md"), "c\n").unwrap();
+    // canonicalize: the tree (and hence resolution) sees the real path,
+    // which on macOS differs from `temp_dir()` (`/var` → `/private/var`)
+    std::fs::canonicalize(&root).unwrap_or(root)
+}
+
+/// Open `rel` (root-relative) in the app and park the cursor at
+/// (row, char col of `needle` + `delta`), e.g. just inside a link.
+fn open_at_link(app: &mut App, root: &std::path::Path, rel: &str, needle: &str, delta: usize) {
+    app.open_file(root.join(rel));
+    let line = app.editor().lines()[0].clone();
+    let byte = line
+        .find(needle)
+        .unwrap_or_else(|| panic!("{needle:?} not in {line:?}"));
+    let col = line[..byte].chars().count() + delta;
+    assert!(app.tab_mut().unwrap().editor.set_cursor(0, col));
+}
+
+#[test]
+fn ctrl_o_with_no_link_under_cursor_sets_status_and_keeps_text() {
+    // Step 2 probe: Ctrl+O must reach app dispatch (textarea 0.9 binds
+    // nothing to it), so with plain text under the cursor it reports
+    // instead of typing or silently doing nothing.
+    let root = link_vault("nolink", "see [[b]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    app.open_file(root.join("notes/a.md"));
+    assert!(app.tab_mut().unwrap().editor.set_cursor(0, 0)); // on 's'
+    app.handle_key(ctrl('o'));
+    assert_eq!(app.status.as_deref(), Some("no link under cursor"));
+    assert_eq!(app.editor().lines(), ["see [[b]]"]);
+    assert_eq!(app.tabs.len(), 1); // opened nothing
+}
+
+#[test]
+fn ctrl_o_follow_link_opens_sibling() {
+    let root = link_vault("sibling", "see [[b]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("notes/b.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_o_missing_link_offers_create_and_submit_creates() {
+    let root = link_vault("missing", "see [[new]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert!(
+        matches!(&app.prompt, Prompt::NewFile(s) if s == "notes/new.md"),
+        "unexpected prompt: {:?}",
+        match &app.prompt {
+            Prompt::NewFile(s) => s.clone(),
+            _ => "<not a NewFile prompt>".into(),
+        }
+    );
+    assert!(app
+        .status
+        .as_deref()
+        .is_some_and(|s| s.contains("no note 'new'")));
+    // the tree selection decides where `files::create` puts a relative
+    // name: pin it to a root-level file so the prefill lands at the root
+    assert!(app.tree.select_path(&root.join("shared.md")));
+    app.handle_key(key(KeyCode::Enter));
+    assert!(matches!(app.prompt, Prompt::None));
+    assert!(root.join("notes/new.md").exists());
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("notes/new.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_o_alias_link_opens_target() {
+    let root = link_vault("alias", "see [[b|Bee]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "Bee", 1);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("notes/b.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_o_heading_link_opens_target_at_heading_row() {
+    let root = link_vault("heading", "see [[b#Target Head]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("notes/b.md").as_path())
+    );
+    assert_eq!(app.editor().cursor(), (0, 0)); // the `# Target Head` line
+}
+
+#[test]
+fn ctrl_o_md_link_follows_relative_and_refuses_remote() {
+    let root = link_vault("mdlink", "see [t](../sib/c.md)\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "../sib/c.md", 1);
+    app.handle_key(ctrl('o'));
+    // `..` resolves lexically, so normalize before comparing
+    let got = app.tab().unwrap().editor.path.clone().unwrap();
+    assert_eq!(std::fs::canonicalize(&got).unwrap(), root.join("sib/c.md"));
+    // remote urls report instead of opening anything
+    let root = link_vault("mdremote", "see [t](https://x)\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "https://x", 1);
+    app.handle_key(ctrl('o'));
+    assert_eq!(app.status.as_deref(), Some("not a local file — https://x"));
+    assert_eq!(app.tabs.len(), 1);
+}
+
+#[test]
+fn ctrl_o_root_fallback_link_opens_root_file() {
+    let root = link_vault("rootfb", "see [[shared]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("shared.md").as_path())
+    );
+}

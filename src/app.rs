@@ -915,6 +915,7 @@ impl App {
                     self.search_next(&q);
                 }
             }
+            (true, KeyCode::Char('o')) => self.follow_link_under_cursor(),
             // crate defaults are Ctrl+U/Ctrl+R with Ctrl+Y = paste;
             // intercept so the advertised keys work
             (true, KeyCode::Char('z')) => {
@@ -1245,6 +1246,119 @@ impl App {
         match crate::files::create(&mut self.tree, name) {
             Ok(path) => self.open_file(path),
             Err(e) => self.status = Some(e),
+        }
+    }
+
+    /// Ctrl+O in the editor: follow the `[[wikilink]]` or `[text](url)`
+    /// under the cursor. Wikilinks reuse `open_file` (autosave-out
+    /// included, already-open switches tab); a missing wikilink target
+    /// offers creation via a prefilled `Prompt::NewFile`. Every no-op
+    /// sets `status` so the key never silently does nothing. Only runs
+    /// with no popup open (`handle_key` routes prompt input elsewhere).
+    fn follow_link_under_cursor(&mut self) {
+        if self.tabs.is_empty() {
+            self.no_file_status();
+            return;
+        }
+        // owned copies first: `open_file` needs `&mut self`
+        let cur = self.tabs.get(self.active).and_then(|tab| {
+            let (row, col) = tab.editor.cursor();
+            let line = tab.editor.current_line()?.to_string();
+            Some((tab.editor.path.clone()?, row, col, line))
+        });
+        let Some((cur_path, _row, col, line)) = cur else {
+            self.status = Some("no link under cursor".into());
+            return;
+        };
+        let root = self.tree.root().to_path_buf();
+        let file_dir = cur_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| root.clone());
+        if let Some(w) = crate::links::parse_wikilink_at(&line, col) {
+            self.follow_wikilink(&root, &file_dir, &w.target, w.heading.as_deref());
+        } else if let Some(m) = crate::links::parse_md_link_at(&line, col) {
+            self.follow_md_url(&root, &file_dir, &m.url);
+        } else {
+            self.status = Some("no link under cursor".into());
+        }
+    }
+
+    /// Open the wikilink `target` (sibling dir first, then the tree
+    /// root, `.md` appended when extensionless), jumping to `heading`
+    /// when present; offer creation when nothing resolves.
+    fn follow_wikilink(
+        &mut self,
+        root: &std::path::Path,
+        file_dir: &std::path::Path,
+        target: &str,
+        heading: Option<&str>,
+    ) {
+        let exists = |p: &std::path::Path| p.is_file();
+        if let Some(path) = crate::links::resolve(target, file_dir, root, &exists) {
+            self.open_file(path);
+            if let Some(h) = heading {
+                self.jump_to_heading(h);
+            }
+        } else {
+            // the first resolution candidate, even though it doesn't
+            // exist yet — submitting the prompt creates it via the
+            // existing new-file flow
+            let mut would_be = file_dir.join(target);
+            if std::path::Path::new(target).extension().is_none() {
+                would_be.set_extension("md");
+            }
+            let prefill = crate::fuzzy::rel_display(root, &would_be);
+            self.status = Some(format!("no note '{target}' — Enter creates, Esc cancels"));
+            self.prompt = Prompt::NewFile(prefill);
+        }
+    }
+
+    /// Open a local `[text](url)` target the same way wikilinks
+    /// resolve; absolute `/...` paths anchor at the tree root.
+    /// Remote urls and `#anchor`-only fragments are refused with a
+    /// status message, and unlike wikilinks a miss never offers
+    /// creation — it just reports.
+    fn follow_md_url(&mut self, root: &std::path::Path, file_dir: &std::path::Path, url: &str) {
+        if url.starts_with("http://")
+            || url.starts_with("https://")
+            || url.starts_with("mailto:")
+            || url.starts_with('#')
+        {
+            self.status = Some(format!("not a local file — {url}"));
+            return;
+        }
+        let exists = |p: &std::path::Path| p.is_file();
+        let hit = if let Some(stripped) = url.strip_prefix('/') {
+            crate::links::resolve(stripped, root, root, &exists)
+        } else {
+            crate::links::resolve(url, file_dir, root, &exists)
+        };
+        match hit {
+            Some(path) => self.open_file(path),
+            None => self.status = Some(format!("no file '{url}'")),
+        }
+    }
+
+    /// After following a `[[t#H]]` link: land on the first line
+    /// containing `H` (case-insensitive), or note the miss.
+    fn jump_to_heading(&mut self, heading: &str) {
+        let row = self.tabs.get(self.active).and_then(|tab| {
+            tab.editor
+                .lines()
+                .iter()
+                .position(|l| crate::search::find_ci(l, heading, 0).is_some())
+        });
+        match row {
+            Some(r) => {
+                if let Some(tab) = self.tabs.get_mut(self.active) {
+                    tab.editor.set_cursor(r, 0);
+                    tab.editor.cancel_selection();
+                }
+            }
+            None => {
+                self.status = Some(format!("note opened; heading '{heading}' not found"));
+            }
         }
     }
 

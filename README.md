@@ -92,6 +92,7 @@ Press `?` inside the app for the key cheat sheet.
 | editor | Ctrl+D | toggle checkbox on the line (`- [ ]` ↔ `- [x]`, `- [X]` → `- [ ]`; other lines gain a `- [ ] ` prefix; Ctrl+Z twice undoes) |
 | editor | Ctrl+F | search in file (popup; case-insensitive; Enter jumps and highlights all matches; empty search repeats the last one) |
 | editor | Ctrl+G | jump to the next match of the last search |
+| editor | Ctrl+O | follow the link under the cursor ([[wikilink]] or [text](path); offers to create a missing note) |
 | editor | Ctrl+J / Ctrl+K | next / previous word |
 | editor | Opt+J / Opt+K | next / previous paragraph |
 | editor | Cmd+J / Cmd+K | end / start of line |
