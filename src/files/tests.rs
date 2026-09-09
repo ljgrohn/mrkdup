@@ -17,7 +17,7 @@ fn fixture(tag: &str) -> PathBuf {
 fn create_writes_an_empty_file_at_root() {
     let root = fixture("create");
     let mut tree = Tree::new(root.clone()).unwrap();
-    let path = create(&mut tree, "new.md").unwrap();
+    let path = create(&mut tree, &root, "new.md").unwrap();
     assert_eq!(path, root.join("new.md"));
     assert_eq!(fs::read(&path).unwrap(), b"");
 }
@@ -25,36 +25,45 @@ fn create_writes_an_empty_file_at_root() {
 #[test]
 fn create_rejects_invalid_names() {
     let root = fixture("create-invalid");
-    let mut tree = Tree::new(root).unwrap();
+    let mut tree = Tree::new(root.clone()).unwrap();
     for name in ["", "..", "/etc/passwd", "docs/../x.md"] {
-        assert!(create(&mut tree, name).is_err(), "accepted {name:?}");
+        assert!(create(&mut tree, &root, name).is_err(), "accepted {name:?}");
     }
 }
 
 #[test]
 fn create_rejects_existing_file() {
     let root = fixture("create-exists");
-    let mut tree = Tree::new(root).unwrap();
-    assert!(create(&mut tree, "a.md").is_err());
+    let mut tree = Tree::new(root.clone()).unwrap();
+    assert!(create(&mut tree, &root, "a.md").is_err());
 }
 
 #[test]
-fn create_in_ignores_the_tree_selection() {
+fn create_ignores_the_tree_selection() {
     let root = fixture("create-in");
     fs::create_dir_all(root.join("sub")).unwrap();
     let mut tree = Tree::new(root.clone()).unwrap();
     // park the selection somewhere unrelated: the file must still land
     // in `base`, not alongside the selection (the link-follow case)
     assert!(tree.select_path(&root.join("sub")));
-    let path = create_in(&mut tree, &root, "notes/new.md").unwrap();
+    let path = create(&mut tree, &root, "notes/new.md").unwrap();
     assert_eq!(path, root.join("notes/new.md"));
     assert!(path.is_file());
     for name in ["", "/x.md", "../x.md"] {
-        assert!(
-            create_in(&mut tree, &root, name).is_err(),
-            "accepted {name:?}"
-        );
+        assert!(create(&mut tree, &root, name).is_err(), "accepted {name:?}");
     }
+}
+
+#[test]
+fn selected_dir_is_the_selected_dir_or_the_selected_files_parent() {
+    let root = fixture("selected-dir");
+    fs::create_dir_all(root.join("sub")).unwrap();
+    fs::write(root.join("sub/x.md"), "x\n").unwrap();
+    let mut tree = Tree::new(root.clone()).unwrap();
+    assert!(tree.select_path(&root.join("sub")));
+    assert_eq!(selected_dir(&tree), root.join("sub"));
+    assert!(tree.select_path(&root.join("a.md")));
+    assert_eq!(selected_dir(&tree), root);
 }
 
 #[test]

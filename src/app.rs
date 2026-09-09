@@ -24,12 +24,11 @@ pub enum Prompt {
     None,
     /// The key cheat sheet, drawn over the editor pane; any key closes it.
     Help,
-    NewFile(String),
-    /// Like `NewFile`, but the name resolves inside `dir` instead of the
-    /// tree selection. The link-follow create offer uses this so the
-    /// file lands where the prefill says even when the tree is parked
-    /// elsewhere; the input stays user-editable, still relative to `dir`.
-    NewFileAt {
+    /// The new-file input; `dir` is where the typed (relative) name
+    /// lands — the tree selection for `n`, the vault root for a
+    /// link-follow create offer — fixed when the prompt opens so the
+    /// file goes where the popup implied whatever the tree does later.
+    NewFile {
         input: String,
         dir: PathBuf,
     },
@@ -513,7 +512,12 @@ impl App {
             KeyCode::Char('s') if key.modifiers.is_empty() => self.open_settings(),
             KeyCode::Char('-') => self.tree.ascend(),
             KeyCode::Char('+') => self.tree.make_root(),
-            KeyCode::Char('n') => self.prompt = Prompt::NewFile(String::new()),
+            KeyCode::Char('n') => {
+                self.prompt = Prompt::NewFile {
+                    input: String::new(),
+                    dir: crate::files::selected_dir(&self.tree),
+                }
+            }
             KeyCode::Char('x' | 'X') => self.confirm_delete(),
             KeyCode::Char('m') => self.start_move(),
             KeyCode::Char('r') => self.start_rename(),
@@ -1136,7 +1140,7 @@ impl App {
         match &mut self.prompt {
             // the cheat sheet: any key closes it and is otherwise consumed
             Prompt::Help => self.prompt = Prompt::None,
-            Prompt::NewFile(s) | Prompt::Search(s) | Prompt::NewFileAt { input: s, .. } => {
+            Prompt::NewFile { input: s, .. } | Prompt::Search(s) => {
                 match key.code {
                     KeyCode::Backspace => {
                         s.pop();
@@ -1144,10 +1148,7 @@ impl App {
                     KeyCode::Char(c) => s.push(c),
                     KeyCode::Enter => {
                         match std::mem::replace(&mut self.prompt, Prompt::None) {
-                            Prompt::NewFile(name) => self.submit_new_file(&name),
-                            Prompt::NewFileAt { input, dir } => {
-                                self.submit_new_file_at(&dir, &input)
-                            }
+                            Prompt::NewFile { input, dir } => self.submit_new_file(&dir, &input),
                             Prompt::Search(query) => {
                                 // empty submit repeats the previous search
                                 let q = if query.is_empty() {
@@ -1286,17 +1287,8 @@ impl App {
         }
     }
 
-    fn submit_new_file(&mut self, name: &str) {
-        match crate::files::create(&mut self.tree, name) {
-            Ok(path) => {
-                self.open_file(path);
-            }
-            Err(e) => self.status = Some(e),
-        }
-    }
-
-    fn submit_new_file_at(&mut self, dir: &std::path::Path, name: &str) {
-        match crate::files::create_in(&mut self.tree, dir, name) {
+    fn submit_new_file(&mut self, dir: &std::path::Path, name: &str) {
+        match crate::files::create(&mut self.tree, dir, name) {
             Ok(path) => {
                 self.open_file(path);
             }
@@ -1342,7 +1334,7 @@ impl App {
     /// Open the wikilink `target` (sibling dir first, then the tree
     /// root, `.md` appended when extensionless; a leading `/` anchors
     /// at the root), jumping to `heading` when present; offer creation
-    /// via `NewFileAt` (root-anchored, so the file lands where the
+    /// via `NewFile` (root-anchored, so the file lands where the
     /// prefill says) when nothing resolves, or refuse when the target
     /// would escape the vault.
     fn follow_wikilink(
@@ -1360,7 +1352,7 @@ impl App {
                 }
             }
         } else {
-            // creation is anchored at the vault root via `NewFileAt`, so
+            // creation is anchored at the vault root via `NewFile`, so
             // the file lands where the prefill says whatever the tree
             // selection is
             match crate::links::create_target(target, file_dir, root) {
@@ -1369,7 +1361,7 @@ impl App {
                     self.status = Some(format!(
                         "no note '{target}' — Enter creates {prefill}, Esc cancels"
                     ));
-                    self.prompt = Prompt::NewFileAt {
+                    self.prompt = Prompt::NewFile {
                         input: prefill,
                         dir: root.to_path_buf(),
                     };

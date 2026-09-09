@@ -923,7 +923,7 @@ fn ctrl_p_does_not_fire_inside_another_prompt() {
     let mut app = App::new(fixture("gtf-nested"), Config::default()).unwrap();
     app.handle_key(key(KeyCode::Char('n'))); // NewFile prompt
     app.handle_key(ctrl('p'));
-    assert!(matches!(app.prompt, Prompt::NewFile(_)));
+    assert!(matches!(app.prompt, Prompt::NewFile { .. }));
 }
 
 #[test]
@@ -983,7 +983,7 @@ fn tick_idle_autosaves() {
 fn ctrl_q_quits_inside_newfile_prompt() {
     let mut app = App::new(fixture("prompt-quit-clean"), Config::default()).unwrap();
     app.handle_key(key(KeyCode::Char('n'))); // open NewFile prompt
-    assert!(matches!(app.prompt, Prompt::NewFile(_)));
+    assert!(matches!(app.prompt, Prompt::NewFile { .. }));
     app.handle_key(ctrl('q')); // Ctrl+Q should quit even inside prompt
     assert!(app.should_quit);
 }
@@ -1948,11 +1948,11 @@ fn ctrl_o_missing_link_offers_create_and_submit_creates() {
     open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
     app.handle_key(ctrl('o'));
     assert!(
-        matches!(&app.prompt, Prompt::NewFileAt{input, ..} if input == "notes/new.md"),
+        matches!(&app.prompt, Prompt::NewFile{input, ..} if input == "notes/new.md"),
         "unexpected prompt: {:?}",
         match &app.prompt {
-            Prompt::NewFileAt { input, .. } => input.clone(),
-            _ => "<not a NewFileAt prompt>".into(),
+            Prompt::NewFile { input, .. } => input.clone(),
+            _ => "<not a NewFile prompt>".into(),
         }
     );
     assert!(app
@@ -1976,18 +1976,18 @@ fn ctrl_o_missing_link_offers_create_and_submit_creates() {
 #[test]
 fn ctrl_o_dotdot_link_offers_creatable_sibling_prefill() {
     // `[[../sib/new]]` from `notes/a.md`: the prefill is normalized to
-    // `sib/new.md` (no `..` for `files::create_in` to reject) and the
+    // `sib/new.md` (no `..` for `files::create` to reject) and the
     // submit creates exactly there
     let root = link_vault("dotdot", "see [[../sib/new]]\n");
     let mut app = App::new(root.clone(), Config::default()).unwrap();
     open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
     app.handle_key(ctrl('o'));
     assert!(
-        matches!(&app.prompt, Prompt::NewFileAt{input, ..} if input == "sib/new.md"),
+        matches!(&app.prompt, Prompt::NewFile{input, ..} if input == "sib/new.md"),
         "unexpected prompt: {:?}",
         match &app.prompt {
-            Prompt::NewFileAt { input, .. } => input.clone(),
-            _ => "<not a NewFileAt prompt>".into(),
+            Prompt::NewFile { input, .. } => input.clone(),
+            _ => "<not a NewFile prompt>".into(),
         }
     );
     app.handle_key(key(KeyCode::Enter));

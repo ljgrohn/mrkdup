@@ -94,10 +94,7 @@ fn draw_popup(f: &mut Frame, app: &mut App, area: Rect) {
         };
         f.render_widget(Paragraph::new(lines), padded);
     }
-    if let Prompt::NewFile(input) = &app.prompt {
-        draw_input_popup(f, area, " New file ", input, theme);
-    }
-    if let Prompt::NewFileAt { input, .. } = &app.prompt {
+    if let Prompt::NewFile { input, .. } = &app.prompt {
         draw_input_popup(f, area, " New file ", input, theme);
     }
     if let Prompt::Search(input) = &app.prompt {
@@ -536,7 +533,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         Focus::Editor => " EDIT ",
     };
     let text = match &app.prompt {
-        Prompt::NewFile(_) | Prompt::NewFileAt { .. } => {
+        Prompt::NewFile { .. } => {
             format!("{mode}| type a name (dir/name.md works) · Enter create · Esc cancel")
         }
         Prompt::Help => format!("{mode}| any key closes"),
