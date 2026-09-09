@@ -6,10 +6,6 @@
 //! [`scan_backlinks`], directory reads), so tests never touch disk
 //! outside temp dirs.
 
-// Task 1 of the wikilinks plan: no callers yet (highlight/app wire up
-// in later tasks), so nothing here is reachable from `main`.
-#![allow(dead_code)]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -165,46 +161,65 @@ pub fn normalize_lexical(path: &Path) -> PathBuf {
     out
 }
 
-/// Resolve `target` to an existing file: try `file_dir.join(p)`, then
-/// `root.join(p)` (with `p` the target verbatim), each tried raw then
-/// with `.md` appended when the target has no extension. A leading `/`
-/// anchors at `root` instead (mirroring `[text](/path)` links): a bare
-/// `Path::join` would silently discard the base for absolute targets
-/// and open files outside the vault. Every candidate is run through
-/// `normalize_lexical` first, so the returned path never carries `..`.
-/// First path where `exists` holds wins; empty targets never resolve.
-///
-/// No sandboxing beyond the vault: a `..` that leaves `root` still
-/// resolves if the file exists (same as the tree's `-` ascend ethos).
+/// Every path `target` may name, in resolution order: under `file_dir`
+/// then under `root` (under `root` only for a leading `/`, mirroring
+/// `[text](/path)` links — a bare `Path::join` would discard the base
+/// and reach outside the vault), each as written and then with `.md`
+/// appended when the target has no extension. Every entry is run
+/// through `normalize_lexical`, so no `..` survives. `resolve` and
+/// `create_target` both read from this list, which is what makes the
+/// path Ctrl+O opens and the path the create offer prefills agree —
+/// and with it tab dedup (`tab_index`) and backlink self-exclusion.
+/// Empty and bare-`/` targets name nothing.
+pub fn candidates(target: &str, file_dir: &Path, root: &Path) -> Vec<PathBuf> {
+    let (p, bases): (&Path, &[&Path]) = match target.strip_prefix('/') {
+        Some("") => return Vec::new(),
+        Some(rest) => (Path::new(rest), &[root]),
+        None if target.is_empty() => return Vec::new(),
+        None => (Path::new(target), &[file_dir, root]),
+    };
+    let add_md = p.extension().is_none();
+    let mut out = Vec::new();
+    for base in bases {
+        let joined = normalize_lexical(&base.join(p));
+        if add_md {
+            let mut with_md = joined.clone();
+            with_md.set_extension("md");
+            out.push(joined);
+            out.push(with_md);
+        } else {
+            out.push(joined);
+        }
+    }
+    out
+}
+
+/// The first of `candidates` for which `exists` holds. No sandboxing
+/// beyond the vault: a `..` that leaves `root` still resolves if the
+/// file exists (same as the tree's `-` ascend ethos).
 pub fn resolve(
     target: &str,
     file_dir: &Path,
     root: &Path,
     exists: &dyn Fn(&Path) -> bool,
 ) -> Option<PathBuf> {
-    if target.is_empty() {
-        return None;
-    }
-    let (p, bases): (&Path, &[_]) = match target.strip_prefix('/') {
-        Some("") => return None, // bare `/` names nothing
-        Some(rest) => (Path::new(rest), &[root]),
-        None => (Path::new(target), &[file_dir, root]),
-    };
-    let add_md = p.extension().is_none();
-    for base in bases {
-        let joined = normalize_lexical(&base.join(p));
-        if exists(&joined) {
-            return Some(joined);
-        }
-        if add_md {
-            let mut with_md = joined.clone();
-            with_md.set_extension("md");
-            if exists(&with_md) {
-                return Some(with_md);
-            }
-        }
-    }
-    None
+    candidates(target, file_dir, root)
+        .into_iter()
+        .find(|p| exists(p))
+}
+
+/// Where following `target` creates a note when nothing resolves: the
+/// first candidate carrying the `.md` extension (the one `resolve`
+/// would have found had the note existed), or the first candidate at
+/// all when the target spells its own extension. The caller decides
+/// whether that path is inside the vault.
+pub fn create_target(target: &str, file_dir: &Path, root: &Path) -> Option<PathBuf> {
+    let cands = candidates(target, file_dir, root);
+    cands
+        .iter()
+        .find(|p| p.extension().is_some_and(|e| e == "md"))
+        .or(cands.first())
+        .cloned()
 }
 
 /// True when `content` links to the note named `stem`: it contains

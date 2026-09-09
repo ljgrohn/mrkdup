@@ -1352,44 +1352,33 @@ impl App {
                 self.jump_to_heading(h);
             }
         } else {
-            // the first resolution candidate, normalized so `..` can't
-            // smuggle an uncreatable prefill past `files::create_in`
-            // (which rejects `..`), and spelled exactly like `resolve`
-            // would return it. Creation is anchored at the vault root
-            // via `NewFileAt`, so the file lands where the prefill says
-            // whatever the tree selection is.
-            let (p, base): (&std::path::Path, &std::path::Path) = match target.strip_prefix('/') {
-                Some("") => {
-                    self.status = Some(format!("can't create '{target}'"));
-                    return;
+            // creation is anchored at the vault root via `NewFileAt`, so
+            // the file lands where the prefill says whatever the tree
+            // selection is
+            match crate::links::create_target(target, file_dir, root) {
+                Some(would_be) if would_be.starts_with(root) => {
+                    let prefill = crate::fuzzy::rel_display(root, &would_be);
+                    self.status = Some(format!(
+                        "no note '{target}' — Enter creates {prefill}, Esc cancels"
+                    ));
+                    self.prompt = Prompt::NewFileAt {
+                        input: prefill,
+                        dir: root.to_path_buf(),
+                    };
                 }
-                Some(rest) => (std::path::Path::new(rest), root),
-                None => (std::path::Path::new(target), file_dir),
-            };
-            let mut would_be = crate::links::normalize_lexical(&base.join(p));
-            if p.extension().is_none() {
-                would_be.set_extension("md");
-            }
-            if would_be.starts_with(root) {
-                let prefill = crate::fuzzy::rel_display(root, &would_be);
-                self.status = Some(format!(
-                    "no note '{target}' — Enter creates {prefill}, Esc cancels"
-                ));
-                self.prompt = Prompt::NewFileAt {
-                    input: prefill,
-                    dir: root.to_path_buf(),
-                };
-            } else {
-                self.status = Some(format!("can't create '{target}' outside the vault"));
+                Some(_) => {
+                    self.status = Some(format!("can't create '{target}' outside the vault"));
+                }
+                None => self.status = Some(format!("can't create '{target}'")),
             }
         }
     }
 
     /// Open a local `[text](url)` target the same way wikilinks
-    /// resolve; absolute `/...` paths anchor at the tree root.
-    /// Remote urls and `#anchor`-only fragments are refused with a
-    /// status message, and unlike wikilinks a miss never offers
-    /// creation — it just reports.
+    /// resolve; absolute `/...` paths anchor at the tree root
+    /// (handled inside `resolve`). Remote urls and `#anchor`-only
+    /// fragments are refused with a status message, and unlike
+    /// wikilinks a miss never offers creation — it just reports.
     fn follow_md_url(&mut self, root: &std::path::Path, file_dir: &std::path::Path, url: &str) {
         if url.starts_with("http://")
             || url.starts_with("https://")
@@ -1400,11 +1389,7 @@ impl App {
             return;
         }
         let exists = |p: &std::path::Path| p.is_file();
-        let hit = if let Some(stripped) = url.strip_prefix('/') {
-            crate::links::resolve(stripped, root, root, &exists)
-        } else {
-            crate::links::resolve(url, file_dir, root, &exists)
-        };
+        let hit = crate::links::resolve(url, file_dir, root, &exists);
         match hit {
             Some(path) => self.open_file(path),
             None => self.status = Some(format!("no file '{url}'")),

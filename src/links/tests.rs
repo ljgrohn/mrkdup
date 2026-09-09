@@ -1,6 +1,7 @@
 use super::*;
 use std::fs;
 use std::path::Path;
+use std::path::PathBuf;
 
 #[test]
 fn wikilink_plain_alias_and_heading() {
@@ -132,4 +133,54 @@ fn scan_backlinks_finds_only_linkers_sorted() {
     let found = scan_backlinks(&root, false, "b");
     assert_eq!(found, vec![root.join("a.md"), root.join("sub/c.md")]);
     let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn candidates_lists_dir_then_root_each_raw_then_md() {
+    let root = Path::new("/vault");
+    let dir = Path::new("/vault/notes");
+    assert_eq!(
+        candidates("plan", dir, root),
+        vec![
+            PathBuf::from("/vault/notes/plan"),
+            PathBuf::from("/vault/notes/plan.md"),
+            PathBuf::from("/vault/plan"),
+            PathBuf::from("/vault/plan.md"),
+        ]
+    );
+    // a leading `/` anchors at the root only; `..` is normalized away
+    assert_eq!(
+        candidates("/abs", dir, root),
+        vec![PathBuf::from("/vault/abs"), PathBuf::from("/vault/abs.md")]
+    );
+    assert_eq!(
+        candidates("../sib/c", dir, root)[0],
+        PathBuf::from("/vault/sib/c")
+    );
+    assert!(candidates("", dir, root).is_empty());
+    assert!(candidates("/", dir, root).is_empty());
+}
+
+#[test]
+fn create_target_is_the_md_candidate_resolve_would_have_found() {
+    let root = Path::new("/vault");
+    let dir = Path::new("/vault/notes");
+    assert_eq!(
+        create_target("new", dir, root),
+        Some(PathBuf::from("/vault/notes/new.md"))
+    );
+    assert_eq!(
+        create_target("/new", dir, root),
+        Some(PathBuf::from("/vault/new.md"))
+    );
+    assert_eq!(
+        create_target("../sib/new", dir, root),
+        Some(PathBuf::from("/vault/sib/new.md"))
+    );
+    // an explicit extension is kept as written
+    assert_eq!(
+        create_target("notes.txt", dir, root),
+        Some(PathBuf::from("/vault/notes/notes.txt"))
+    );
+    assert_eq!(create_target("/", dir, root), None);
 }
