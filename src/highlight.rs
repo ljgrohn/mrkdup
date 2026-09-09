@@ -315,6 +315,37 @@ fn inline_based(chars: &[char], from: usize, to: usize, base: Kind) -> Vec<SpanT
                 }
             }
         }
+        // [[wikilink]] / [[target|alias]] / [[target#heading]]
+        if c == '[' && chars.get(i + 1) == Some(&'[') {
+            if let Some(close) = find_pair(chars, i + 2, to, ']') {
+                // same validity rule as links::parse_wikilink_at: the
+                // target (inner before any '|'/'#') must be non-empty
+                let pipe = (i + 2..close).find(|&j| chars[j] == '|');
+                let pre_end = pipe.unwrap_or(close);
+                let hash = (i + 2..pre_end).find(|&j| chars[j] == '#');
+                let target_end = hash.unwrap_or(pre_end);
+                if target_end > i + 2 {
+                    flush(&mut spans, text_start, i);
+                    spans.push(tok(i, i + 2, Kind::Mark));
+                    match pipe {
+                        Some(p) => {
+                            if p > i + 2 {
+                                spans.push(tok(i + 2, p, Kind::LinkText));
+                            }
+                            spans.push(tok(p, p + 1, Kind::Mark));
+                            if p + 1 < close {
+                                spans.push(tok(p + 1, close, Kind::LinkText));
+                            }
+                        }
+                        None => spans.push(tok(i + 2, close, Kind::LinkText)),
+                    }
+                    spans.push(tok(close, close + 2, Kind::Mark));
+                    i = close + 2;
+                    text_start = i;
+                    continue;
+                }
+            }
+        }
         // [text](url)
         if c == '[' {
             if let Some(rb) = find(chars, i + 1, to, ']') {
