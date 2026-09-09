@@ -1885,7 +1885,7 @@ fn wheel_over_a_stale_editor_rect_with_no_file_open_errors() {
     assert_eq!(app.status.as_deref(), Some(NO_FILE));
 }
 
-/// Task 3 (Ctrl+O follow-link) fixtures: a vault with a subdirectory,
+/// Ctrl+O follow-link fixtures: a vault with a subdirectory,
 /// so sibling-dir vs root fallback resolution is exercisable.
 fn link_vault(tag: &str, a_content: &str) -> std::path::PathBuf {
     let owned = std::env::temp_dir().join(format!("mrkdup-link-{tag}"));
@@ -2123,7 +2123,7 @@ fn ctrl_o_note_name_with_a_dot_opens_its_md_file() {
     );
 }
 
-/// Task 4 (Ctrl+L backlinks) fixture: `a.md` and `sub/c.md` link
+/// Ctrl+L backlinks fixture: `a.md` and `sub/c.md` link
 /// `[[b]]`, `sub/e.md` reaches it through a path (`[[../b]]`), `d.md`
 /// links elsewhere (so it is lonely), and `b.md` self-links (so the
 /// popup must exclude the current file).

@@ -266,7 +266,7 @@ fn mixed_endings_first_line_terminator_wins_crlf() {
     );
 }
 
-/// Task 3 contract: `cursor()` cols are char indices straight into
+/// Cursor contract: `cursor()` cols are char indices straight into
 /// `lines()[row]`, so `links::parse_wikilink_at` takes them as-is.
 /// textarea 0.9's `DataCursor` is character-wise (not display width),
 /// and this test pins that with multibyte text on both sides of the

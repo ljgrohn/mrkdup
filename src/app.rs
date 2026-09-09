@@ -1310,11 +1310,11 @@ impl App {
     }
 
     /// Open the wikilink `target` (sibling dir first, then the tree
-    /// root, `.md` appended when extensionless; a leading `/` anchors
-    /// at the root), jumping to `heading` when present; offer creation
-    /// via `NewFile` (root-anchored, so the file lands where the
-    /// prefill says) when nothing resolves, or refuse when the target
-    /// would escape the vault.
+    /// root, `.md` appended unless the target already ends in `.md`; a
+    /// leading `/` anchors at the root), jumping to `heading` when
+    /// present; offer creation via `NewFile` (root-anchored, so the
+    /// file lands where the prefill says) when nothing resolves, or
+    /// refuse when the target would escape the vault.
     fn follow_wikilink(
         &mut self,
         root: &std::path::Path,

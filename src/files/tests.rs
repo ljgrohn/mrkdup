@@ -40,7 +40,7 @@ fn create_rejects_existing_file() {
 
 #[test]
 fn create_ignores_the_tree_selection() {
-    let root = fixture("create-in");
+    let root = fixture("create-base");
     fs::create_dir_all(root.join("sub")).unwrap();
     let mut tree = Tree::new(root.clone()).unwrap();
     // park the selection somewhere unrelated: the file must still land

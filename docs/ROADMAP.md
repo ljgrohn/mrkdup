@@ -9,6 +9,6 @@ live in `docs/superpowers/plans/`.
 The larger feature ideas (agent-launch, git awareness, checkbox index)
 are deferred — not planned at this time.
 
-## Proposed
+## Done
 
 - [x] Obsidian-style local linking (see docs/superpowers/plans/2026-09-09-wikilinks.md).
