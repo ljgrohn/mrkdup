@@ -2235,3 +2235,25 @@ fn ctrl_o_on_an_alias_of_an_open_file_switches_tab_instead_of_duplicating() {
         Some(root.join("notes/b.md").as_path())
     );
 }
+
+#[test]
+fn ctrl_o_heading_link_to_an_unopenable_file_keeps_the_source_cursor() {
+    // `notes/bin` exists but is not UTF-8, so the open fails; the heading
+    // jump must not then run against the still-active source file (which
+    // mentions "intro" in its body) nor replace the open-failed status
+    let root = link_vault("badopen", "intro here, see [[bin#Intro]]\n");
+    fs::write(root.join("notes/bin"), [0xffu8, 0xfe, 0x00, 0x01]).unwrap();
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    let before = app.editor().cursor();
+    app.handle_key(ctrl('o'));
+    assert_eq!(app.tabs.len(), 1);
+    assert_eq!(app.editor().cursor(), before);
+    assert!(
+        app.status
+            .as_deref()
+            .is_some_and(|s| s.starts_with("open failed")),
+        "status: {:?}",
+        app.status
+    );
+}

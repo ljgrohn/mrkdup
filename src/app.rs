@@ -763,16 +763,18 @@ impl App {
 
     /// Open `path` in a new tab right of the active one and focus the
     /// editor — or, if it's already open, just switch to that tab. The
-    /// tab being left autosaves on the way out.
-    fn open_file(&mut self, path: PathBuf) {
+    /// tab being left autosaves on the way out. Returns whether `path`
+    /// is now the active tab (false when the read failed; `status` then
+    /// says why).
+    fn open_file(&mut self, path: PathBuf) -> bool {
         if let Some(i) = self.tab_index(&path) {
             self.activate_tab(i);
-            return;
+            return true;
         }
         let mut editor = Editor::new();
         if let Err(e) = editor.open(&path) {
             self.status = Some(format!("open failed: {e}"));
-            return;
+            return false;
         }
         self.autosave_active();
         let at = if self.tabs.is_empty() {
@@ -785,6 +787,7 @@ impl App {
         self.focus = Focus::Editor;
         self.editor_visible = true;
         self.pending_quit = false;
+        true
     }
 
     /// The tab showing `path`, if any.
@@ -1285,14 +1288,18 @@ impl App {
 
     fn submit_new_file(&mut self, name: &str) {
         match crate::files::create(&mut self.tree, name) {
-            Ok(path) => self.open_file(path),
+            Ok(path) => {
+                self.open_file(path);
+            }
             Err(e) => self.status = Some(e),
         }
     }
 
     fn submit_new_file_at(&mut self, dir: &std::path::Path, name: &str) {
         match crate::files::create_in(&mut self.tree, dir, name) {
-            Ok(path) => self.open_file(path),
+            Ok(path) => {
+                self.open_file(path);
+            }
             Err(e) => self.status = Some(e),
         }
     }
@@ -1347,9 +1354,10 @@ impl App {
     ) {
         let exists = |p: &std::path::Path| p.is_file();
         if let Some(path) = crate::links::resolve(target, file_dir, root, &exists) {
-            self.open_file(crate::fsutil::canonical(path));
-            if let Some(h) = heading {
-                self.jump_to_heading(h);
+            if self.open_file(crate::fsutil::canonical(path)) {
+                if let Some(h) = heading {
+                    self.jump_to_heading(h);
+                }
             }
         } else {
             // creation is anchored at the vault root via `NewFileAt`, so
@@ -1391,7 +1399,9 @@ impl App {
         let exists = |p: &std::path::Path| p.is_file();
         let hit = crate::links::resolve(url, file_dir, root, &exists);
         match hit {
-            Some(path) => self.open_file(crate::fsutil::canonical(path)),
+            Some(path) => {
+                self.open_file(crate::fsutil::canonical(path));
+            }
             None => self.status = Some(format!("no file '{url}'")),
         }
     }
