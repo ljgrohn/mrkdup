@@ -21,6 +21,7 @@ bodies highlight as CSS and `<script>` bodies as JavaScript.
 Every character stays visible; syntax
 marks are dimmed, never hidden, so the layout never shifts under your
 cursor. Tabs display as 4 spaces, not tab-stops.
+`[[wikilinks]]` highlight like links; `Ctrl+O` follows, `Ctrl+L` shows backlinks.
 
 Until you open a file, the editor pane shows a short key cheat sheet;
 it disappears the moment a file opens.

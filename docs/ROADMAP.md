@@ -11,4 +11,4 @@ are deferred — not planned at this time.
 
 ## Proposed
 
-- [ ] Obsidian-style local linking (see docs/superpowers/plans/2026-09-09-wikilinks.md).
+- [x] Obsidian-style local linking (see docs/superpowers/plans/2026-09-09-wikilinks.md).
