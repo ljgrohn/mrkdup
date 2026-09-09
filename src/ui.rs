@@ -104,6 +104,7 @@ fn draw_popup(f: &mut Frame, app: &mut App, area: Rect) {
         draw_input_popup(f, area, " Rename ", input, theme);
     }
     if let Prompt::GoToFile {
+        title,
         input,
         candidates,
         selected,
@@ -119,12 +120,13 @@ fn draw_popup(f: &mut Frame, app: &mut App, area: Rect) {
             .max()
             .unwrap_or(0)
             .max(input.len() + 8)
+            .max(title.len())
             .max(40) as u16
             + 4;
         let height = (visible as u16 + 3).min(area.height); // borders + input line
         let popup = centered_rect(width, height, area);
         f.render_widget(Clear, popup);
-        let block = popup_block(" Go to file ", theme);
+        let block = popup_block(title, theme);
         let inner = block.inner(popup);
         f.render_widget(block, popup);
         let mut lines = vec![Line::from(vec![
@@ -140,49 +142,6 @@ fn draw_popup(f: &mut Frame, app: &mut App, area: Rect) {
             }
             lines.push(line);
         }
-        f.render_widget(Paragraph::new(lines), inner);
-    }
-    if let Prompt::Backlinks {
-        candidates,
-        selected,
-    } = &app.prompt
-    {
-        let stem = app
-            .tab()
-            .and_then(|t| t.editor.path.as_ref())
-            .and_then(|p| p.file_stem())
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let title = format!(" links to {stem} ({}) ", candidates.len());
-        let width = candidates
-            .iter()
-            .map(|c| c.0.len())
-            .max()
-            .unwrap_or(10)
-            .max(title.len()) as u16
-            + 6;
-        let height = (candidates.len() as u16 + 2).min(area.height);
-        let popup = centered_rect(width.max(30), height, area);
-        f.render_widget(Clear, popup);
-        let block = popup_block(&title, theme);
-        let inner = block.inner(popup);
-        f.render_widget(block, popup);
-        // keep the selection visible if the list is taller than the popup
-        let visible = inner.height as usize;
-        let top = selected.saturating_sub(visible.saturating_sub(1));
-        let lines: Vec<Line> = candidates
-            .iter()
-            .enumerate()
-            .skip(top)
-            .take(visible)
-            .map(|(i, c)| {
-                let mut line = Line::from(format!(" {} ", c.0));
-                if i == *selected {
-                    line = line.style(Style::default().add_modifier(Modifier::REVERSED));
-                }
-                line
-            })
-            .collect();
         f.render_widget(Paragraph::new(lines), inner);
     }
     if let Prompt::MoveFile {
@@ -548,9 +507,6 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         }
         Prompt::ConfirmDelete { .. } | Prompt::MoveFile { .. } => {
             format!("{mode}| j/k choose · Enter confirm · Esc cancel")
-        }
-        Prompt::Backlinks { .. } => {
-            format!("{mode}| j/k choose · Enter open · Esc cancel")
         }
         Prompt::Settings { .. } => {
             let mut s = format!("{mode}| h/l or ←/→ change · j/k move · Esc close");

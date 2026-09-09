@@ -97,7 +97,7 @@ Press `?` inside the app for the key cheat sheet.
 | editor | Ctrl+F | search in file (popup; case-insensitive; Enter jumps and highlights all matches; empty search repeats the last one) |
 | editor | Ctrl+G | jump to the next match of the last search |
 | editor | Ctrl+O | follow the link under the cursor: a `[[wikilink]]`, or a `[text](path)` with the cursor on the path (`path#heading` and `%20` escapes work; a leading `/` is the vault root). `[[note#Heading]]` lands on that heading. Offers to create a missing note |
-| editor | Ctrl+L | list notes linking here (backlinks) |
+| editor | Ctrl+L | list notes linking here (backlinks) in the go-to-file picker: type to filter, Enter opens |
 | editor | Ctrl+J / Ctrl+K | next / previous word |
 | editor | Opt+J / Opt+K | next / previous paragraph |
 | editor | Cmd+J / Cmd+K | end / start of line |

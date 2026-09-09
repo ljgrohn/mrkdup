@@ -47,17 +47,13 @@ pub enum Prompt {
         input: String,
     },
     GoToFile {
+        /// Popup title, e.g. ` Go to file ` or ` links to plan (3) `.
+        title: String,
         input: String,
         /// (root-relative display path, absolute path), collected once
         /// when the popup opens.
         candidates: Vec<(String, PathBuf)>,
         /// Index into the current filtered result list.
-        selected: usize,
-    },
-    Backlinks {
-        /// (root-relative display path, absolute path), collected once
-        /// when the popup opens. No filter input in v1.
-        candidates: Vec<(String, PathBuf)>,
         selected: usize,
     },
     /// The settings list (`s` in the tree): one row per option, `h`/`l`
@@ -597,6 +593,7 @@ impl App {
         let candidates =
             crate::fuzzy::collect_candidates(self.tree.root(), self.tree.show_hidden());
         self.prompt = Prompt::GoToFile {
+            title: " Go to file ".to_string(),
             input: String::new(),
             candidates,
             selected: 0,
@@ -1122,6 +1119,7 @@ impl App {
                 input,
                 candidates,
                 selected,
+                ..
             } = &mut self.prompt
             {
                 let n = crate::fuzzy::fuzzy_filter(input, candidates).len();
@@ -1199,6 +1197,7 @@ impl App {
                 input,
                 candidates,
                 selected,
+                ..
             } => match key.code {
                 KeyCode::Backspace => {
                     input.pop();
@@ -1259,27 +1258,6 @@ impl App {
                     let (s, d) = (src.clone(), dests[*selected].clone());
                     self.prompt = Prompt::None;
                     self.move_file(s, d);
-                }
-                _ => {}
-            },
-            // the backlinks list: no filter input in v1, just move and
-            // open (`Esc` is closed globally above, like every popup)
-            Prompt::Backlinks {
-                candidates,
-                selected,
-            } => match key.code {
-                KeyCode::Char('j') | KeyCode::Down => {
-                    *selected = (*selected + 1).min(candidates.len().saturating_sub(1));
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    *selected = selected.saturating_sub(1);
-                }
-                KeyCode::Enter => {
-                    let target = candidates.get(*selected).map(|c| c.1.clone());
-                    self.prompt = Prompt::None;
-                    if let Some(path) = target {
-                        self.open_file(path);
-                    }
                 }
                 _ => {}
             },
@@ -1405,7 +1383,8 @@ impl App {
     }
 
     /// Ctrl+L in the editor: list the notes linking to the open file
-    /// ("what links here") in a popup. The scan runs per press, so it
+    /// ("what links here") in the go-to-file picker, titled with the
+    /// note and the count. The scan runs per press, so it
     /// is always fresh; the current file is excluded even if it
     /// self-links. An empty result just sets `status` (no popup), and
     /// every no-op sets `status` so the key never silently does
@@ -1439,7 +1418,9 @@ impl App {
             self.status = Some(format!("no links to '{stem}' yet"));
             return;
         }
-        self.prompt = Prompt::Backlinks {
+        self.prompt = Prompt::GoToFile {
+            title: format!(" links to {stem} ({}) ", candidates.len()),
+            input: String::new(),
             candidates,
             selected: 0,
         };

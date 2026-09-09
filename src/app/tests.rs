@@ -2146,13 +2146,17 @@ fn ctrl_l_backlinks_popup_lists_sorted_linkers_excluding_current_file() {
     let mut app = App::new(root.clone(), Config::default()).unwrap();
     app.open_file(root.join("b.md"));
     app.handle_key(ctrl('l'));
-    let Prompt::Backlinks {
+    let Prompt::GoToFile {
+        title,
+        input,
         candidates,
         selected,
     } = &app.prompt
     else {
-        panic!("expected a Backlinks popup, got status {:?}", app.status);
+        panic!("expected the picker, got status {:?}", app.status);
     };
+    assert_eq!(title, " links to b (2) ");
+    assert_eq!(input, "");
     assert_eq!(*selected, 0);
     assert_eq!(candidates.len(), 2);
     assert_eq!(candidates[0].0, "a.md");
@@ -2174,10 +2178,10 @@ fn ctrl_l_backlinks_enter_opens_candidate_and_esc_closes() {
         app.tab().unwrap().editor.path.as_deref(),
         Some(root.join("a.md").as_path())
     );
-    // j moves down; Enter opens the second hit
+    // ↓ moves down; Enter opens the second hit
     app.open_file(root.join("b.md")); // already open: just switches back
     app.handle_key(ctrl('l'));
-    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Down));
     app.handle_key(key(KeyCode::Enter));
     assert!(matches!(app.prompt, Prompt::None));
     assert_eq!(
@@ -2187,12 +2191,26 @@ fn ctrl_l_backlinks_enter_opens_candidate_and_esc_closes() {
     // Esc closes the popup without switching
     app.open_file(root.join("b.md"));
     app.handle_key(ctrl('l'));
-    assert!(matches!(app.prompt, Prompt::Backlinks { .. }));
+    assert!(matches!(app.prompt, Prompt::GoToFile { .. }));
     app.handle_key(key(KeyCode::Esc));
     assert!(matches!(app.prompt, Prompt::None));
     assert_eq!(
         app.tab().unwrap().editor.path.as_deref(),
         Some(root.join("b.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_l_backlinks_typing_filters_like_go_to_file() {
+    let root = backlink_vault("filter");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    app.open_file(root.join("b.md"));
+    app.handle_key(ctrl('l'));
+    app.handle_key(key(KeyCode::Char('c')));
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("sub/c.md").as_path())
     );
 }
 
