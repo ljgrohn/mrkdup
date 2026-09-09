@@ -1347,7 +1347,7 @@ impl App {
     ) {
         let exists = |p: &std::path::Path| p.is_file();
         if let Some(path) = crate::links::resolve(target, file_dir, root, &exists) {
-            self.open_file(path);
+            self.open_file(crate::fsutil::canonical(path));
             if let Some(h) = heading {
                 self.jump_to_heading(h);
             }
@@ -1391,7 +1391,7 @@ impl App {
         let exists = |p: &std::path::Path| p.is_file();
         let hit = crate::links::resolve(url, file_dir, root, &exists);
         match hit {
-            Some(path) => self.open_file(path),
+            Some(path) => self.open_file(crate::fsutil::canonical(path)),
             None => self.status = Some(format!("no file '{url}'")),
         }
     }

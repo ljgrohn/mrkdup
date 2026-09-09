@@ -121,5 +121,15 @@ pub fn is_text_file(path: &Path) -> bool {
     !buf[..n].contains(&0)
 }
 
+/// The filesystem's own spelling of `path`: symlinks followed, case as
+/// stored on disk. Tabs are keyed by path, so a followed link must open
+/// this spelling — otherwise `[[Note]]` on a case-insensitive disk, or a
+/// symlinked `alias.md`, opens a second buffer of a file that is already
+/// open and the two race on autosave. Falls back to `path` when the
+/// lookup fails (the open then reports its own error).
+pub(crate) fn canonical(path: std::path::PathBuf) -> std::path::PathBuf {
+    std::fs::canonicalize(&path).unwrap_or(path)
+}
+
 #[cfg(test)]
 mod tests;

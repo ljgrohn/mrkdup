@@ -2215,3 +2215,23 @@ fn ctrl_l_backlinks_no_open_file_sets_status_without_panic() {
     assert!(matches!(app.prompt, Prompt::None));
     assert_eq!(app.status.as_deref(), Some(NO_FILE_OPEN));
 }
+
+#[cfg(unix)]
+#[test]
+fn ctrl_o_on_an_alias_of_an_open_file_switches_tab_instead_of_duplicating() {
+    // `notes/alias.md` is a symlink to `notes/b.md`; following
+    // `[[alias]]` while b.md is open must land in b.md's tab, not open a
+    // second buffer of the same file (two buffers race on autosave)
+    let root = link_vault("alias-tab", "see [[alias]]\n");
+    std::os::unix::fs::symlink(root.join("notes/b.md"), root.join("notes/alias.md")).unwrap();
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    app.open_file(root.join("notes/b.md"));
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    assert_eq!(app.tabs.len(), 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(app.tabs.len(), 2);
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("notes/b.md").as_path())
+    );
+}
