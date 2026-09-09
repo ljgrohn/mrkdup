@@ -2025,3 +2025,96 @@ fn ctrl_o_root_fallback_link_opens_root_file() {
         Some(root.join("shared.md").as_path())
     );
 }
+
+/// Task 4 (Ctrl+L backlinks) fixture: `a.md` and `sub/c.md` link
+/// `[[b]]`, `d.md` links elsewhere (so it is lonely), and `b.md`
+/// self-links (so the popup must exclude the current file).
+fn backlink_vault(tag: &str) -> std::path::PathBuf {
+    let owned = std::env::temp_dir().join(format!("mrkdup-backlink-{tag}"));
+    let _ = fs::remove_dir_all(&owned);
+    let root = owned.join("root");
+    fs::create_dir_all(root.join("sub")).unwrap();
+    fs::write(root.join("a.md"), "see [[b]]\n").unwrap();
+    fs::write(root.join("sub/c.md"), "see [[b#H]]\n").unwrap();
+    fs::write(root.join("d.md"), "see [[other]]\n").unwrap();
+    fs::write(root.join("b.md"), "self [[b]]\n").unwrap();
+    // canonicalize: the tree (and hence the scan) sees the real path,
+    // which on macOS differs from `temp_dir()` (`/var` → `/private/var`)
+    std::fs::canonicalize(&root).unwrap_or(root)
+}
+
+#[test]
+fn ctrl_l_backlinks_popup_lists_sorted_linkers_excluding_current_file() {
+    let root = backlink_vault("list");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    app.open_file(root.join("b.md"));
+    app.handle_key(ctrl('l'));
+    let Prompt::Backlinks {
+        candidates,
+        selected,
+    } = &app.prompt
+    else {
+        panic!("expected a Backlinks popup, got status {:?}", app.status);
+    };
+    assert_eq!(*selected, 0);
+    assert_eq!(candidates.len(), 2);
+    assert_eq!(candidates[0].0, "a.md");
+    assert_eq!(candidates[0].1, root.join("a.md"));
+    assert_eq!(candidates[1].0, "sub/c.md");
+    assert_eq!(candidates[1].1, root.join("sub/c.md"));
+}
+
+#[test]
+fn ctrl_l_backlinks_enter_opens_candidate_and_esc_closes() {
+    let root = backlink_vault("openesc");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    // Enter on the first candidate switches to its tab and clears it
+    app.open_file(root.join("b.md"));
+    app.handle_key(ctrl('l'));
+    app.handle_key(key(KeyCode::Enter));
+    assert!(matches!(app.prompt, Prompt::None));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("a.md").as_path())
+    );
+    // j moves down; Enter opens the second hit
+    app.open_file(root.join("b.md")); // already open: just switches back
+    app.handle_key(ctrl('l'));
+    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Enter));
+    assert!(matches!(app.prompt, Prompt::None));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("sub/c.md").as_path())
+    );
+    // Esc closes the popup without switching
+    app.open_file(root.join("b.md"));
+    app.handle_key(ctrl('l'));
+    assert!(matches!(app.prompt, Prompt::Backlinks { .. }));
+    app.handle_key(key(KeyCode::Esc));
+    assert!(matches!(app.prompt, Prompt::None));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("b.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_l_backlinks_lonely_file_sets_status_and_no_popup() {
+    let root = backlink_vault("lonely");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    app.open_file(root.join("d.md"));
+    app.handle_key(ctrl('l'));
+    assert!(matches!(app.prompt, Prompt::None));
+    assert_eq!(app.status.as_deref(), Some("no links to 'd' yet"));
+}
+
+#[test]
+fn ctrl_l_backlinks_no_open_file_sets_status_without_panic() {
+    let root = backlink_vault("nofile");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    app.focus = Focus::Editor; // welcome page covers the editor pane
+    app.handle_key(ctrl('l'));
+    assert!(matches!(app.prompt, Prompt::None));
+    assert_eq!(app.status.as_deref(), Some(NO_FILE_OPEN));
+}

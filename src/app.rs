@@ -47,6 +47,12 @@ pub enum Prompt {
         /// Index into the current filtered result list.
         selected: usize,
     },
+    Backlinks {
+        /// (root-relative display path, absolute path), collected once
+        /// when the popup opens. No filter input in v1.
+        candidates: Vec<(String, PathBuf)>,
+        selected: usize,
+    },
     /// The settings list (`s` in the tree): one row per option, `h`/`l`
     /// cycle the selected row's value and apply it immediately.
     Settings {
@@ -916,6 +922,7 @@ impl App {
                 }
             }
             (true, KeyCode::Char('o')) => self.follow_link_under_cursor(),
+            (true, KeyCode::Char('l')) => self.show_backlinks(),
             // crate defaults are Ctrl+U/Ctrl+R with Ctrl+Y = paste;
             // intercept so the advertised keys work
             (true, KeyCode::Char('z')) => {
@@ -1238,6 +1245,27 @@ impl App {
                 }
                 _ => {}
             },
+            // the backlinks list: no filter input in v1, just move and
+            // open (`Esc` is closed globally above, like every popup)
+            Prompt::Backlinks {
+                candidates,
+                selected,
+            } => match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    *selected = (*selected + 1).min(candidates.len().saturating_sub(1));
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    *selected = selected.saturating_sub(1);
+                }
+                KeyCode::Enter => {
+                    let target = candidates.get(*selected).map(|c| c.1.clone());
+                    self.prompt = Prompt::None;
+                    if let Some(path) = target {
+                        self.open_file(path);
+                    }
+                }
+                _ => {}
+            },
             Prompt::None => {}
         }
     }
@@ -1338,6 +1366,47 @@ impl App {
             Some(path) => self.open_file(path),
             None => self.status = Some(format!("no file '{url}'")),
         }
+    }
+
+    /// Ctrl+L in the editor: list the notes linking to the open file
+    /// ("what links here") in a popup. The scan runs per press, so it
+    /// is always fresh; the current file is excluded even if it
+    /// self-links. An empty result just sets `status` (no popup), and
+    /// every no-op sets `status` so the key never silently does
+    /// nothing. Only runs with no popup open (`handle_key` routes
+    /// prompt input elsewhere).
+    fn show_backlinks(&mut self) {
+        let cur = self
+            .tabs
+            .get(self.active)
+            .and_then(|tab| tab.editor.path.clone());
+        let Some(path) = cur else {
+            self.no_file_status();
+            return;
+        };
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let root = self.tree.root().to_path_buf();
+        let mut candidates: Vec<(String, PathBuf)> =
+            crate::links::scan_backlinks(&root, self.tree.show_hidden(), &stem)
+                .into_iter()
+                .filter(|p| p != &path)
+                .map(|p| {
+                    let display = crate::fuzzy::rel_display(&root, &p);
+                    (display, p)
+                })
+                .collect();
+        candidates.sort();
+        if candidates.is_empty() {
+            self.status = Some(format!("no links to '{stem}' yet"));
+            return;
+        }
+        self.prompt = Prompt::Backlinks {
+            candidates,
+            selected: 0,
+        };
     }
 
     /// After following a `[[t#H]]` link: land on the first line
