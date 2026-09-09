@@ -177,10 +177,39 @@ fn create_target_is_the_md_candidate_resolve_would_have_found() {
         create_target("../sib/new", dir, root),
         Some(PathBuf::from("/vault/sib/new.md"))
     );
-    // an explicit extension is kept as written
+    // no `.md` yet: creation appends one, like Obsidian
     assert_eq!(
         create_target("notes.txt", dir, root),
-        Some(PathBuf::from("/vault/notes/notes.txt"))
+        Some(PathBuf::from("/vault/notes/notes.txt.md"))
     );
     assert_eq!(create_target("/", dir, root), None);
+}
+
+#[test]
+fn dots_in_a_note_name_are_not_an_extension() {
+    let root = Path::new("/vault");
+    let dir = Path::new("/vault/notes");
+    let exists = |p: &Path| p == Path::new("/vault/notes/v1.2.md");
+    assert_eq!(
+        resolve("v1.2", dir, root, &exists).unwrap(),
+        Path::new("/vault/notes/v1.2.md")
+    );
+    assert_eq!(
+        create_target("v1.2", dir, root),
+        Some(PathBuf::from("/vault/notes/v1.2.md"))
+    );
+    // an explicit `.md` is never doubled
+    assert_eq!(
+        candidates("plan.md", dir, root),
+        vec![
+            PathBuf::from("/vault/notes/plan.md"),
+            PathBuf::from("/vault/plan.md"),
+        ]
+    );
+    // a real file with another extension still resolves as written
+    let exists = |p: &Path| p == Path::new("/vault/notes/photo.png");
+    assert_eq!(
+        resolve("photo.png", dir, root, &exists).unwrap(),
+        Path::new("/vault/notes/photo.png")
+    );
 }

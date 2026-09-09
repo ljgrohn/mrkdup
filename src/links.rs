@@ -165,12 +165,13 @@ pub fn normalize_lexical(path: &Path) -> PathBuf {
 /// then under `root` (under `root` only for a leading `/`, mirroring
 /// `[text](/path)` links — a bare `Path::join` would discard the base
 /// and reach outside the vault), each as written and then with `.md`
-/// appended when the target has no extension. Every entry is run
-/// through `normalize_lexical`, so no `..` survives. `resolve` and
-/// `create_target` both read from this list, which is what makes the
-/// path Ctrl+O opens and the path the create offer prefills agree —
-/// and with it tab dedup (`tab_index`) and backlink self-exclusion.
-/// Empty and bare-`/` targets name nothing.
+/// appended unless the target already ends in `.md` (a dot inside a
+/// note name is not an extension: `[[v1.2]]` reaches `v1.2.md`). Every
+/// entry is run through `normalize_lexical`, so no `..` survives.
+/// `resolve` and `create_target` both read from this list, which is
+/// what makes the path Ctrl+O opens and the path the create offer
+/// prefills agree — and with it tab dedup (`tab_index`) and backlink
+/// self-exclusion. Empty and bare-`/` targets name nothing.
 pub fn candidates(target: &str, file_dir: &Path, root: &Path) -> Vec<PathBuf> {
     let (p, bases): (&Path, &[&Path]) = match target.strip_prefix('/') {
         Some("") => return Vec::new(),
@@ -178,15 +179,15 @@ pub fn candidates(target: &str, file_dir: &Path, root: &Path) -> Vec<PathBuf> {
         None if target.is_empty() => return Vec::new(),
         None => (Path::new(target), &[file_dir, root]),
     };
-    let add_md = p.extension().is_none();
+    let add_md = !p.extension().is_some_and(|e| e == "md");
     let mut out = Vec::new();
     for base in bases {
         let joined = normalize_lexical(&base.join(p));
         if add_md {
-            let mut with_md = joined.clone();
-            with_md.set_extension("md");
+            let mut with_md = joined.clone().into_os_string();
+            with_md.push(".md");
             out.push(joined);
-            out.push(with_md);
+            out.push(PathBuf::from(with_md));
         } else {
             out.push(joined);
         }
@@ -209,17 +210,13 @@ pub fn resolve(
 }
 
 /// Where following `target` creates a note when nothing resolves: the
-/// first candidate carrying the `.md` extension (the one `resolve`
-/// would have found had the note existed), or the first candidate at
-/// all when the target spells its own extension. The caller decides
-/// whether that path is inside the vault.
+/// first candidate carrying the `.md` extension — the one `resolve`
+/// would have found had the note existed. The caller decides whether
+/// that path is inside the vault.
 pub fn create_target(target: &str, file_dir: &Path, root: &Path) -> Option<PathBuf> {
-    let cands = candidates(target, file_dir, root);
-    cands
-        .iter()
+    candidates(target, file_dir, root)
+        .into_iter()
         .find(|p| p.extension().is_some_and(|e| e == "md"))
-        .or(cands.first())
-        .cloned()
 }
 
 /// True when `content` links to the note named `stem`: it contains

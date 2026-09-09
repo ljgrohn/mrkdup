@@ -2110,6 +2110,19 @@ fn ctrl_o_root_fallback_link_opens_root_file() {
     );
 }
 
+#[test]
+fn ctrl_o_note_name_with_a_dot_opens_its_md_file() {
+    let root = link_vault("dotname", "see [[v1.2]]\n");
+    fs::write(root.join("notes/v1.2.md"), "release\n").unwrap();
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("notes/v1.2.md").as_path())
+    );
+}
+
 /// Task 4 (Ctrl+L backlinks) fixture: `a.md` and `sub/c.md` link
 /// `[[b]]`, `d.md` links elsewhere (so it is lonely), and `b.md`
 /// self-links (so the popup must exclude the current file).
