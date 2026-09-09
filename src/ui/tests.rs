@@ -1,6 +1,7 @@
 use super::*;
 use crate::app::App;
 use crate::config::Config;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::TestBackend, Terminal};
 use std::fs;
 
@@ -461,4 +462,32 @@ fn draw_records_settings_popup_hits_with_arrows_on_the_glyphs() {
     ));
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     assert!(app.settings_hits.is_none());
+}
+
+#[test]
+fn link_follow_create_offer_shows_its_message_in_the_status_bar() {
+    let root = std::env::temp_dir().join("mrkdup-ui-create-offer");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("notes")).unwrap();
+    fs::write(root.join("notes/a.md"), "see [[new]]\n").unwrap();
+    let root = root.canonicalize().unwrap();
+    let mut app = App::new(root, Config::default()).unwrap();
+    // keys only (App's open_file is private): expand `notes`, select
+    // a.md, open it, then walk the cursor inside `[[new]]`
+    for code in [KeyCode::Char('l'), KeyCode::Char('j'), KeyCode::Enter] {
+        app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+    for _ in 0..6 {
+        app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    }
+    app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
+    let backend = TestBackend::new(80, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let text = format!("{:?}", terminal.backend().buffer());
+    assert!(text.contains("New file"), "popup title missing");
+    assert!(
+        text.contains("Enter creates notes/new.md"),
+        "status message missing:\n{text}"
+    );
 }

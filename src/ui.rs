@@ -533,9 +533,13 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         Focus::Editor => " EDIT ",
     };
     let text = match &app.prompt {
-        Prompt::NewFile { .. } => {
-            format!("{mode}| type a name (dir/name.md works) · Enter create · Esc cancel")
-        }
+        Prompt::NewFile { .. } => match &app.status {
+            // a link-follow create offer explains itself here
+            Some(msg) => format!("{mode}| {msg}"),
+            None => {
+                format!("{mode}| type a name (dir/name.md works) · Enter create · Esc cancel")
+            }
+        },
         Prompt::Help => format!("{mode}| any key closes"),
         Prompt::Search(_) => format!("{mode}| Enter jump · Esc cancel"),
         Prompt::Rename { .. } => format!("{mode}| type the new name · Enter rename · Esc cancel"),
