@@ -3,10 +3,9 @@
 //!
 //! Everything here works over plain strings and paths — the only
 //! filesystem touch is a caller-supplied existence predicate (or, for
-//! [`scan_backlinks`], directory reads), so tests never touch disk
-//! outside temp dirs.
+//! [`backlinks`], the file walk and the notes it reads), so tests
+//! never touch disk outside temp dirs.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 /// One `[[target]]` / `[[target|alias]]` / `[[target#heading]]`
@@ -236,58 +235,67 @@ pub fn create_target(target: &str, file_dir: &Path, root: &Path) -> Option<PathB
         .find(|p| p.extension().is_some_and(|e| e == "md"))
 }
 
-/// True when `content` links to the note named `stem`: it contains
-/// `[[<stem>]]`, `[[<stem>|`, or `[[<stem>#`. Case-sensitive.
-pub fn backlink_matches(content: &str, stem: &str) -> bool {
-    content.contains(&format!("[[{stem}]]"))
-        || content.contains(&format!("[[{stem}|"))
-        || content.contains(&format!("[[{stem}#"))
+/// Cheap pre-check before `resolve`: a link can only reach `target` if
+/// its last path segment is `target`'s file name, with or without the
+/// `.md`, ignoring ASCII case (case-insensitive disks resolve `[[B]]`
+/// to `b.md`). No filesystem access.
+///
+/// Only ever a pre-filter, so it errs permissive: a false positive
+/// costs one wasted `resolve` (which, with the path equality, still
+/// decides the answer) while a false negative would silently lose a
+/// real backlink. So the segment compared is the last *non-empty* one
+/// — `[[b/]]` reaches `b.md`, since `candidates` normalizes the empty
+/// trailing component away — and a `..` tail, which names a directory
+/// this function cannot put a name to, is let through.
+fn may_name(link_target: &str, target: &Path) -> bool {
+    let Some(name) = target.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let Some(last) = link_target
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+    else {
+        return false;
+    };
+    last == ".."
+        || last.eq_ignore_ascii_case(name)
+        || name
+            .strip_suffix(".md")
+            .is_some_and(|stem| last.eq_ignore_ascii_case(stem))
 }
 
-/// All text files under `root` linking to the note named `stem`,
-/// sorted, capped at 5000.
-///
-/// Uses the same `ignore::WalkBuilder` flags as
-/// `fuzzy::collect_candidates` (hidden/git_ignore/git_exclude
-/// toggles, `require_git(false)`, `git_global(false)`,
-/// `parents(false)`, skip `.git`), the same cap, the same
-/// `fsutil::is_text_file` gate; unreadable files are skipped.
-pub(crate) fn scan_backlinks(root: &Path, show_hidden: bool, stem: &str) -> Vec<PathBuf> {
-    const CAP: usize = 5000;
-    let mut out = Vec::new();
-    let ignores = crate::tree::root_gitignore(root);
-    let walker = ignore::WalkBuilder::new(root)
-        .hidden(!show_hidden)
-        .git_ignore(!show_hidden)
-        .git_exclude(!show_hidden)
-        .require_git(false)
-        .git_global(false)
-        .parents(false)
-        .filter_entry(|e| e.file_name() != ".git")
-        .build();
-    for entry in walker.flatten() {
-        if out.len() >= CAP {
-            break;
-        }
-        if !entry.file_type().is_some_and(|t| t.is_file()) {
-            continue;
-        }
-        let path = entry.into_path();
-        if !show_hidden && crate::tree::is_root_ignored(&ignores, root, &path, false) {
-            continue;
-        }
-        if !crate::fsutil::is_text_file(&path) {
-            continue;
-        }
-        let Ok(content) = fs::read_to_string(&path) else {
-            continue;
-        };
-        if backlink_matches(&content, stem) {
-            out.push(path);
-        }
-    }
-    out.sort();
-    out
+/// The notes under `root` linking to `target`: every `[[...]]` in every
+/// text file (`wikilinks`) is resolved from that file's directory
+/// exactly as Ctrl+O would (`resolve`, then the on-disk spelling), so
+/// `[[b]]`, `[[notes/b]]`, `[[b.md]]`, `[[/b]]` and `[[../b]]` all
+/// count and a `[[b]]` that reaches a different `b.md` does not. Walks
+/// the same files as the go-to-file picker — `fuzzy::collect_candidates`,
+/// same ignore rules, same 5000-file cap — skips `target` itself, and
+/// returns (root-relative display, absolute path) in the picker's order.
+/// Files that fail to read as UTF-8 are skipped.
+pub(crate) fn backlinks(root: &Path, show_hidden: bool, target: &Path) -> Vec<(String, PathBuf)> {
+    let exists = |p: &Path| p.is_file();
+    crate::fuzzy::collect_candidates(root, show_hidden)
+        .into_iter()
+        .filter(|(_, path)| path != target)
+        .filter(|(_, path)| {
+            let Ok(content) = std::fs::read_to_string(path) else {
+                return false;
+            };
+            if !content.contains("[[") {
+                return false;
+            }
+            let dir = path.parent().unwrap_or(root);
+            content.lines().flat_map(wikilinks).any(|w| {
+                may_name(&w.target, target)
+                    && resolve(&w.target, dir, root, &exists)
+                        .map(crate::fsutil::canonical)
+                        .is_some_and(|p| p == target)
+            })
+        })
+        .collect()
 }
 
 /// `s` as a heading anchor: trimmed, lower-cased, spaces as `-`, only

@@ -2124,8 +2124,9 @@ fn ctrl_o_note_name_with_a_dot_opens_its_md_file() {
 }
 
 /// Task 4 (Ctrl+L backlinks) fixture: `a.md` and `sub/c.md` link
-/// `[[b]]`, `d.md` links elsewhere (so it is lonely), and `b.md`
-/// self-links (so the popup must exclude the current file).
+/// `[[b]]`, `sub/e.md` reaches it through a path (`[[../b]]`), `d.md`
+/// links elsewhere (so it is lonely), and `b.md` self-links (so the
+/// popup must exclude the current file).
 fn backlink_vault(tag: &str) -> std::path::PathBuf {
     let owned = std::env::temp_dir().join(format!("mrkdup-backlink-{tag}"));
     let _ = fs::remove_dir_all(&owned);
@@ -2133,6 +2134,7 @@ fn backlink_vault(tag: &str) -> std::path::PathBuf {
     fs::create_dir_all(root.join("sub")).unwrap();
     fs::write(root.join("a.md"), "see [[b]]\n").unwrap();
     fs::write(root.join("sub/c.md"), "see [[b#H]]\n").unwrap();
+    fs::write(root.join("sub/e.md"), "see [[../b]]\n").unwrap();
     fs::write(root.join("d.md"), "see [[other]]\n").unwrap();
     fs::write(root.join("b.md"), "self [[b]]\n").unwrap();
     // canonicalize: the tree (and hence the scan) sees the real path,
@@ -2155,14 +2157,16 @@ fn ctrl_l_backlinks_popup_lists_sorted_linkers_excluding_current_file() {
     else {
         panic!("expected the picker, got status {:?}", app.status);
     };
-    assert_eq!(title, " links to b (2) ");
+    assert_eq!(title, " links to b (3) ");
     assert_eq!(input, "");
     assert_eq!(*selected, 0);
-    assert_eq!(candidates.len(), 2);
+    assert_eq!(candidates.len(), 3);
     assert_eq!(candidates[0].0, "a.md");
     assert_eq!(candidates[0].1, root.join("a.md"));
     assert_eq!(candidates[1].0, "sub/c.md");
     assert_eq!(candidates[1].1, root.join("sub/c.md"));
+    assert_eq!(candidates[2].0, "sub/e.md");
+    assert_eq!(candidates[2].1, root.join("sub/e.md"));
 }
 
 #[test]

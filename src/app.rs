@@ -1384,12 +1384,13 @@ impl App {
 
     /// Ctrl+L in the editor: list the notes linking to the open file
     /// ("what links here") in the go-to-file picker, titled with the
-    /// note and the count. The scan runs per press, so it
-    /// is always fresh; the current file is excluded even if it
-    /// self-links. An empty result just sets `status` (no popup), and
-    /// every no-op sets `status` so the key never silently does
-    /// nothing. Only runs with no popup open (`handle_key` routes
-    /// prompt input elsewhere).
+    /// note and the count. The scan runs per press over the same files
+    /// the go-to-file picker lists, resolving each `[[link]]` the way
+    /// Ctrl+O would, so it is always fresh; the current file is
+    /// excluded even if it self-links. An empty result just sets
+    /// `status` (no popup), and every no-op sets `status` so the key
+    /// never silently does nothing. Only runs with no popup open
+    /// (`handle_key` routes prompt input elsewhere).
     fn show_backlinks(&mut self) {
         let cur = self
             .tabs
@@ -1404,16 +1405,7 @@ impl App {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
         let root = self.tree.root().to_path_buf();
-        let mut candidates: Vec<(String, PathBuf)> =
-            crate::links::scan_backlinks(&root, self.tree.show_hidden(), &stem)
-                .into_iter()
-                .filter(|p| p != &path)
-                .map(|p| {
-                    let display = crate::fuzzy::rel_display(&root, &p);
-                    (display, p)
-                })
-                .collect();
-        candidates.sort();
+        let candidates = crate::links::backlinks(&root, self.tree.show_hidden(), &path);
         if candidates.is_empty() {
             self.status = Some(format!("no links to '{stem}' yet"));
             return;

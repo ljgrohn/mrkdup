@@ -113,26 +113,52 @@ fn resolve_returns_normalized_paths() {
 }
 
 #[test]
-fn backlink_matches_all_three_forms_only() {
-    assert!(backlink_matches("see [[plan]]", "plan"));
-    assert!(backlink_matches("see [[plan|P]]", "plan"));
-    assert!(backlink_matches("see [[plan#H]]", "plan"));
-    assert!(!backlink_matches("see [[planet]]", "plan"));
-    assert!(!backlink_matches("see [[my plan]]", "plan"));
+fn backlinks_resolve_every_spelling_ctrl_o_follows() {
+    let root = std::env::temp_dir().join("mrkdup-links-backlinks");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("sub")).unwrap();
+    fs::create_dir_all(root.join("home")).unwrap();
+    let root = root.canonicalize().unwrap();
+    fs::write(root.join("b.md"), "self [[b]]\n").unwrap();
+    fs::write(root.join("a.md"), "see [[b]]\n").unwrap(); // bare stem
+    fs::write(root.join("sub/c.md"), "see [[b#H]] and [[../b|B]]\n").unwrap(); // root fallback, `..`
+    fs::write(root.join("e.md"), "see [[/b]]\n").unwrap(); // root-anchored
+    fs::write(root.join("f.md"), "see [[b.md]]\n").unwrap(); // explicit .md
+    fs::write(root.join("g.md"), "see [[b/]]\n").unwrap(); // trailing slash
+    fs::write(root.join("d.md"), "see [[other]]\n").unwrap(); // lonely
+                                                              // a same-stem note elsewhere: `[[b]]` beside it resolves there, not to root/b.md
+    fs::write(root.join("home/b.md"), "other b\n").unwrap();
+    fs::write(root.join("home/todo.md"), "see [[b]]\n").unwrap();
+    fs::write(root.join("bin.dat"), [0u8, 1, 2, 3]).unwrap();
+    let found = backlinks(&root, false, &root.join("b.md"));
+    let displays: Vec<&str> = found.iter().map(|(d, _)| d.as_str()).collect();
+    assert_eq!(displays, ["a.md", "e.md", "f.md", "g.md", "sub/c.md"]);
+    assert_eq!(found[0].1, root.join("a.md"));
+    // and home/b.md's backlinks are exactly its neighbour
+    let found = backlinks(&root, false, &root.join("home/b.md"));
+    let displays: Vec<&str> = found.iter().map(|(d, _)| d.as_str()).collect();
+    assert_eq!(displays, ["home/todo.md"]);
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
-fn scan_backlinks_finds_only_linkers_sorted() {
-    let root = std::env::temp_dir().join("mrkdup-links-scan");
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(root.join("sub")).unwrap();
-    fs::write(root.join("a.md"), "see [[b]]\n").unwrap();
-    fs::write(root.join("sub/c.md"), "see [[b#H]]\n").unwrap();
-    fs::write(root.join("d.md"), "see [[other]]\n").unwrap();
-    fs::write(root.join("bin.dat"), [0u8, 1, 2, 3]).unwrap();
-    let found = scan_backlinks(&root, false, "b");
-    assert_eq!(found, vec![root.join("a.md"), root.join("sub/c.md")]);
-    let _ = fs::remove_dir_all(&root);
+fn may_name_is_a_cheap_filename_prefilter() {
+    let t = Path::new("/vault/notes/b.md");
+    for link in ["b", "b.md", "notes/b", "/b", "../notes/b", "B"] {
+        assert!(may_name(link, t), "{link}");
+    }
+    for link in ["bb", "b.txt", "notes"] {
+        assert!(!may_name(link, t), "{link}");
+    }
+    // a trailing slash is not a different note: `resolve` drops the empty
+    // component, so Ctrl+O opens b.md from `[[b/]]` and the pre-filter
+    // must not veto it
+    assert!(may_name("b/", t));
+    assert!(may_name("notes/b/", t));
+    // a `..` tail names a directory `resolve` can still reach, and the
+    // pre-filter cannot tell which: it lets the link through
+    assert!(may_name("sub/..", t));
+    assert!(may_name("v1.2", Path::new("/vault/v1.2.md")));
 }
 
 #[test]
