@@ -2272,3 +2272,19 @@ fn ctrl_o_heading_link_skips_body_text_that_mentions_the_heading() {
     assert_eq!(app.editor().cursor(), (2, 0)); // the `## Second` line
     assert_eq!(app.status, None);
 }
+
+#[test]
+fn ctrl_o_heading_link_into_a_scrolled_tab_follows_the_cursor_again() {
+    let root = link_vault("headscroll", "see [[b#Target Head]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    app.open_file(root.join("notes/b.md"));
+    app.tab_mut().unwrap().follow_cursor = false; // as a wheel scroll leaves it
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("notes/b.md").as_path())
+    );
+    assert!(app.tab().unwrap().follow_cursor);
+    assert_eq!(app.editor().cursor(), (0, 0));
+}

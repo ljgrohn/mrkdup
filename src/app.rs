@@ -1448,18 +1448,22 @@ impl App {
     }
 
     /// After following a `[[t#H]]` link (or a `path#H` markdown link):
-    /// land on the heading `H` (`links::heading_row`), or note the miss.
+    /// land on the heading `H` (`links::heading_row`) with the view
+    /// following the cursor again (a wheel scroll may have parked it),
+    /// or note the miss.
     fn jump_to_heading(&mut self, heading: &str) {
-        let row = self
-            .tabs
-            .get(self.active)
-            .and_then(|tab| crate::links::heading_row(tab.editor.lines(), heading));
-        match row {
+        let Some(tab) = self.tabs.get_mut(self.active) else {
+            return;
+        };
+        match crate::links::heading_row(tab.editor.lines(), heading) {
             Some(r) => {
-                if let Some(tab) = self.tabs.get_mut(self.active) {
-                    tab.editor.set_cursor(r, 0);
-                    tab.editor.cancel_selection();
+                tab.follow_cursor = true;
+                // set_cursor guards the u16::MAX bound that Jump takes
+                if !tab.editor.set_cursor(r, 0) {
+                    self.status = Some("heading is beyond line 65535 — cannot jump".into());
+                    return;
                 }
+                tab.editor.cancel_selection();
             }
             None => {
                 self.status = Some(format!("note opened; heading '{heading}' not found"));
