@@ -186,6 +186,50 @@ fn create_target_is_the_md_candidate_resolve_would_have_found() {
 }
 
 #[test]
+fn nested_open_brackets_make_the_inner_link_win() {
+    // the outer `[[` is plain text; only `[[b]]` is a link
+    let line = "[[a [[b]]";
+    let all = wikilinks(line);
+    assert_eq!(all.len(), 1);
+    assert_eq!(
+        (all[0].target.as_str(), all[0].start, all[0].end),
+        ("b", 4, 9)
+    );
+    assert!(parse_wikilink_at(line, 2).is_none()); // on `a`
+    assert_eq!(parse_wikilink_at(line, 6).unwrap().target, "b");
+    // `[[[[b]]`: the first accepted open is index 1 (`[[[b]]`, target `[`)
+    let all = wikilinks("[[[[b]]");
+    assert_eq!(all.len(), 1);
+    assert_eq!((all[0].start, all[0].end), (1, 7));
+}
+
+#[test]
+fn wikilinks_lists_every_link_in_a_line_in_order() {
+    let all = wikilinks("[[a]] and [[b|B]] and [[c#H]] and [[oops");
+    let targets: Vec<&str> = all.iter().map(|w| w.target.as_str()).collect();
+    assert_eq!(targets, ["a", "b", "c"]);
+    assert_eq!(all[1].alias.as_deref(), Some("B"));
+    assert_eq!(all[2].heading.as_deref(), Some("H"));
+    assert!(wikilinks("no links here").is_empty());
+}
+
+#[test]
+fn wikilink_span_accepts_exactly_what_the_parser_accepts() {
+    for line in ["a [[plan]] b", "a [[plan|P]] b", "a [[p#H]] b", "[[a](b)]]"] {
+        let chars: Vec<char> = line.chars().collect();
+        let open = chars.windows(2).position(|w| w == ['[', '[']).unwrap();
+        let span = wikilink_span(&chars, open, chars.len()).unwrap();
+        let link = parse_wikilink_at(line, open).unwrap();
+        assert_eq!((link.start, link.end), (open, span.close + 2), "{line}");
+    }
+    for line in ["a [[oops b", "a [[]] b", "a [[|alias]] b", "a [[#h]] b"] {
+        let chars: Vec<char> = line.chars().collect();
+        let open = chars.windows(2).position(|w| w == ['[', '[']).unwrap();
+        assert!(wikilink_span(&chars, open, chars.len()).is_none(), "{line}");
+    }
+}
+
+#[test]
 fn dots_in_a_note_name_are_not_an_extension() {
     let root = Path::new("/vault");
     let dir = Path::new("/vault/notes");

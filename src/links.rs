@@ -34,64 +34,78 @@ pub struct MdLink {
     pub end: usize,
 }
 
-/// The `[[...]]` spanning char column `col`, or `None`.
-///
-/// Finds the last `[[` at/before `col`, then the first `]]` after it;
-/// `col` must lie within `open..close+2`. Unclosed `[[` and empty
-/// targets (including `[[|alias]]`) yield `None`.
-///
-/// Splitting rule: the inner text splits on the first `|` into target
-/// part + alias, then the target part splits on the first `#` into
-/// target + heading — so a `#` after the `|` belongs to the alias
-/// (e.g. `[[plan#sec|see #2]]` has heading `sec` and alias `see #2`).
-pub fn parse_wikilink_at(line: &str, col: usize) -> Option<WikiLink> {
+/// The shape of one accepted `[[...]]`: `close` indexes its `]]`, `pipe`
+/// the first `|` inside, `hash` the first `#` before that `|` (a `#`
+/// after the `|` belongs to the alias).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WikiSpan {
+    pub close: usize,
+    pub pipe: Option<usize>,
+    pub hash: Option<usize>,
+}
+
+/// The `[[...]]` opening at `open` in `chars[..to]`, or `None` when
+/// `open` is not on a `[[`, no `]]` follows, another `[[` opens inside
+/// (the innermost pair wins: `[[a [[b]]` is text plus `[[b]]`), or the
+/// target — the inner text before any `|`/`#` — is empty. This is the
+/// one acceptance rule: the highlighter paints exactly the spans this
+/// accepts and `wikilinks` lists exactly the same, so what looks like a
+/// link is what Ctrl+O follows. `[[a](b)]]` is therefore a wikilink
+/// with target `a](b)` on both sides, not a markdown link.
+pub fn wikilink_span(chars: &[char], open: usize, to: usize) -> Option<WikiSpan> {
+    let to = to.min(chars.len());
+    if open + 1 >= to || chars[open] != '[' || chars[open + 1] != '[' {
+        return None;
+    }
+    let inner = open + 2;
+    let close = (inner..to.saturating_sub(1)).find(|&j| chars[j] == ']' && chars[j + 1] == ']')?;
+    if (inner..close.saturating_sub(1)).any(|j| chars[j] == '[' && chars[j + 1] == '[') {
+        return None;
+    }
+    let pipe = (inner..close).find(|&j| chars[j] == '|');
+    let pre_end = pipe.unwrap_or(close);
+    let hash = (inner..pre_end).find(|&j| chars[j] == '#');
+    if hash.unwrap_or(pre_end) == inner {
+        return None; // empty target, e.g. `[[]]`, `[[|alias]]`, `[[#h]]`
+    }
+    Some(WikiSpan { close, pipe, hash })
+}
+
+/// Every wikilink in `line`, left to right, scanning the way the
+/// highlighter does: after an accepted span continue past its `]]`,
+/// otherwise advance one char. `start`/`end` are char indices of the
+/// whole `[[...]]`.
+pub fn wikilinks(line: &str) -> Vec<WikiLink> {
     let chars: Vec<char> = line.chars().collect();
     let n = chars.len();
-    if col >= n {
-        return None;
+    let text = |a: usize, b: usize| chars[a..b].iter().collect::<String>();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < n {
+        let Some(s) = wikilink_span(&chars, i, n) else {
+            i += 1;
+            continue;
+        };
+        let inner = i + 2;
+        let pre_end = s.pipe.unwrap_or(s.close);
+        let target_end = s.hash.unwrap_or(pre_end);
+        out.push(WikiLink {
+            target: text(inner, target_end),
+            alias: s.pipe.map(|p| text(p + 1, s.close)),
+            heading: s.hash.map(|h| text(h + 1, pre_end)),
+            start: i,
+            end: s.close + 2,
+        });
+        i = s.close + 2;
     }
-    let mut open = None;
-    for i in 0..n.saturating_sub(1) {
-        if i > col {
-            break;
-        }
-        if chars[i] == '[' && chars[i + 1] == '[' {
-            open = Some(i);
-        }
-    }
-    let open = open?;
-    let mut close = None;
-    let mut j = open + 2;
-    while j + 1 < n {
-        if chars[j] == ']' && chars[j + 1] == ']' {
-            close = Some(j);
-            break;
-        }
-        j += 1;
-    }
-    let close = close?;
-    if col >= close + 2 {
-        return None;
-    }
-    let inner: String = chars[open + 2..close].iter().collect();
-    let (pre, alias) = match inner.split_once('|') {
-        Some((a, b)) => (a, Some(b.to_string())),
-        None => (inner.as_str(), None),
-    };
-    let (target, heading) = match pre.split_once('#') {
-        Some((t, h)) => (t, Some(h.to_string())),
-        None => (pre, None),
-    };
-    if target.is_empty() {
-        return None;
-    }
-    Some(WikiLink {
-        target: target.to_string(),
-        alias,
-        heading,
-        start: open,
-        end: close + 2,
-    })
+    out
+}
+
+/// The `[[...]]` spanning char column `col`, or `None`.
+pub fn parse_wikilink_at(line: &str, col: usize) -> Option<WikiLink> {
+    wikilinks(line)
+        .into_iter()
+        .find(|w| w.start <= col && col < w.end)
 }
 
 /// The `[text](url)` whose `(url)` span contains char column `col`, or

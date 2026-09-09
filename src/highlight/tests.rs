@@ -824,33 +824,36 @@ fn wikilink_inside_code_stays_code() {
 
 #[test]
 fn wikilink_highlight_agrees_with_parser() {
-    // painted links parse, and parser-accepted links paint
-    for line in ["a [[plan]] b", "a [[plan|P]] b", "a [[p#H]] b"] {
-        let spans = &hl(&[line])[0];
-        assert!(spans.iter().any(|t| t.kind == Kind::LinkText), "{line}");
+    let lines = [
+        "a [[plan]] b",
+        "a [[plan|P]] b",
+        "a [[p#H]] b",
+        "[[a [[b]]",
+        "[[[[b]]",
+        "[[a](b)]]",
+        "x [[a]] y [[b|B]] z",
+        "a [[oops b",
+        "a [[]] b",
+        "a [[|alias]] b",
+    ];
+    for line in lines {
         let chars: Vec<char> = line.chars().collect();
-        let open = chars.windows(2).position(|w| w == ['[', '[']).unwrap();
-        assert!(
-            crate::links::parse_wikilink_at(line, open).is_some(),
-            "{line}"
-        );
-        assert!(
-            crate::links::parse_wikilink_at(line, open + 2).is_some(),
-            "{line}"
-        );
-    }
-    // rejected targets never paint
-    for line in ["a [[oops b", "a [[]] b", "a [[|alias]] b"] {
         let spans = &hl(&[line])[0];
-        assert!(!spans.iter().any(|t| t.kind == Kind::LinkText), "{line}");
-        let chars: Vec<char> = line.chars().collect();
-        let Some(open) = chars.windows(2).position(|w| w == ['[', '[']) else {
-            continue;
-        };
-        assert!(
-            crate::links::parse_wikilink_at(line, open + 2).is_none(),
-            "{line}"
-        );
+        let painted_opens: Vec<usize> = spans
+            .iter()
+            .filter(|t| {
+                t.kind == Kind::Mark
+                    && t.end == t.start + 2
+                    && chars[t.start] == '['
+                    && chars[t.start + 1] == '['
+            })
+            .map(|t| t.start)
+            .collect();
+        let parsed_opens: Vec<usize> = crate::links::wikilinks(line)
+            .iter()
+            .map(|w| w.start)
+            .collect();
+        assert_eq!(painted_opens, parsed_opens, "{line}");
     }
 }
 
