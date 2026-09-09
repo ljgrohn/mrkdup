@@ -13,15 +13,25 @@ use crate::tree::Tree;
 /// selected file; at the root with nothing selected). Refreshes `tree`
 /// on success; the caller is responsible for opening the new file.
 pub fn create(tree: &mut Tree, name: &str) -> Result<PathBuf, String> {
-    let name = name.trim();
-    if name.is_empty() || name.starts_with('/') || name.split('/').any(|part| part == "..") {
-        return Err("invalid file name".into());
-    }
     let base = match tree.selected_row() {
         Some(r) if r.is_dir => r.path.clone(),
         Some(r) => r.path.parent().unwrap_or(tree.root()).to_path_buf(),
         None => tree.root().to_path_buf(),
     };
+    create_in(tree, &base, name)
+}
+
+/// Create an empty file named `name` inside `base`, whatever the tree
+/// selection is. The link-follow create offer needs this: its prefill
+/// names a vault-relative path anchored at the vault root, and joining
+/// it onto an unrelated selection would create the file where the
+/// prefill doesn't say (leaving the link dangling). Same validation,
+/// refresh, and atomic-write path as `create`.
+pub fn create_in(tree: &mut Tree, base: &Path, name: &str) -> Result<PathBuf, String> {
+    let name = name.trim();
+    if name.is_empty() || name.starts_with('/') || name.split('/').any(|part| part == "..") {
+        return Err("invalid file name".into());
+    }
     let path = base.join(name);
     if path.exists() {
         return Err("file already exists".into());

@@ -39,6 +39,25 @@ fn create_rejects_existing_file() {
 }
 
 #[test]
+fn create_in_ignores_the_tree_selection() {
+    let root = fixture("create-in");
+    fs::create_dir_all(root.join("sub")).unwrap();
+    let mut tree = Tree::new(root.clone()).unwrap();
+    // park the selection somewhere unrelated: the file must still land
+    // in `base`, not alongside the selection (the link-follow case)
+    assert!(tree.select_path(&root.join("sub")));
+    let path = create_in(&mut tree, &root, "notes/new.md").unwrap();
+    assert_eq!(path, root.join("notes/new.md"));
+    assert!(path.is_file());
+    for name in ["", "/x.md", "../x.md"] {
+        assert!(
+            create_in(&mut tree, &root, name).is_err(),
+            "accepted {name:?}"
+        );
+    }
+}
+
+#[test]
 fn rename_moves_the_file_and_redirects_the_open_editor() {
     let root = fixture("rename");
     let mut tree = Tree::new(root.clone()).unwrap();

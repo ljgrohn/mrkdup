@@ -140,10 +140,39 @@ pub fn parse_md_link_at(line: &str, col: usize) -> Option<MdLink> {
     None
 }
 
+/// `path` with `.` popped and `..` resolved lexically (no filesystem
+/// access, symlinks untouched). A `..` with nothing left to pop is kept,
+/// so paths escaping the vault stay recognizable as such. Pure, so
+/// resolution and creation-prefill agree on one spelling — which is what
+/// makes tab dedup (`tab_index`) and backlink self-exclusion compare
+/// equal paths.
+pub fn normalize_lexical(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::ParentDir => {
+                if matches!(out.components().next_back(), Some(Component::Normal(_))) {
+                    out.pop();
+                } else {
+                    out.push("..");
+                }
+            }
+            Component::CurDir => {}
+            _ => out.push(c.as_os_str()),
+        }
+    }
+    out
+}
+
 /// Resolve `target` to an existing file: try `file_dir.join(p)`, then
 /// `root.join(p)` (with `p` the target verbatim), each tried raw then
-/// with `.md` appended when the target has no extension. First path
-/// where `exists` holds wins; empty targets never resolve.
+/// with `.md` appended when the target has no extension. A leading `/`
+/// anchors at `root` instead (mirroring `[text](/path)` links): a bare
+/// `Path::join` would silently discard the base for absolute targets
+/// and open files outside the vault. Every candidate is run through
+/// `normalize_lexical` first, so the returned path never carries `..`.
+/// First path where `exists` holds wins; empty targets never resolve.
 ///
 /// No sandboxing beyond the vault: a `..` that leaves `root` still
 /// resolves if the file exists (same as the tree's `-` ascend ethos).
@@ -156,10 +185,14 @@ pub fn resolve(
     if target.is_empty() {
         return None;
     }
-    let p = Path::new(target);
+    let (p, bases): (&Path, &[_]) = match target.strip_prefix('/') {
+        Some("") => return None, // bare `/` names nothing
+        Some(rest) => (Path::new(rest), &[root]),
+        None => (Path::new(target), &[file_dir, root]),
+    };
     let add_md = p.extension().is_none();
-    for base in [file_dir, root] {
-        let joined = base.join(p);
+    for base in bases {
+        let joined = normalize_lexical(&base.join(p));
         if exists(&joined) {
             return Some(joined);
         }

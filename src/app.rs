@@ -25,6 +25,14 @@ pub enum Prompt {
     /// The key cheat sheet, drawn over the editor pane; any key closes it.
     Help,
     NewFile(String),
+    /// Like `NewFile`, but the name resolves inside `dir` instead of the
+    /// tree selection. The link-follow create offer uses this so the
+    /// file lands where the prefill says even when the tree is parked
+    /// elsewhere; the input stays user-editable, still relative to `dir`.
+    NewFileAt {
+        input: String,
+        dir: PathBuf,
+    },
     Search(String),
     ConfirmDelete {
         path: PathBuf,
@@ -1125,28 +1133,33 @@ impl App {
         match &mut self.prompt {
             // the cheat sheet: any key closes it and is otherwise consumed
             Prompt::Help => self.prompt = Prompt::None,
-            Prompt::NewFile(s) | Prompt::Search(s) => match key.code {
-                KeyCode::Backspace => {
-                    s.pop();
-                }
-                KeyCode::Char(c) => s.push(c),
-                KeyCode::Enter => {
-                    match std::mem::replace(&mut self.prompt, Prompt::None) {
-                        Prompt::NewFile(name) => self.submit_new_file(&name),
-                        Prompt::Search(query) => {
-                            // empty submit repeats the previous search
-                            let q = if query.is_empty() {
-                                self.last_search.clone()
-                            } else {
-                                query
-                            };
-                            self.search_next(&q);
-                        }
-                        _ => {}
+            Prompt::NewFile(s) | Prompt::Search(s) | Prompt::NewFileAt { input: s, .. } => {
+                match key.code {
+                    KeyCode::Backspace => {
+                        s.pop();
                     }
+                    KeyCode::Char(c) => s.push(c),
+                    KeyCode::Enter => {
+                        match std::mem::replace(&mut self.prompt, Prompt::None) {
+                            Prompt::NewFile(name) => self.submit_new_file(&name),
+                            Prompt::NewFileAt { input, dir } => {
+                                self.submit_new_file_at(&dir, &input)
+                            }
+                            Prompt::Search(query) => {
+                                // empty submit repeats the previous search
+                                let q = if query.is_empty() {
+                                    self.last_search.clone()
+                                } else {
+                                    query
+                                };
+                                self.search_next(&q);
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
             Prompt::ConfirmDelete { path, yes } => match key.code {
                 KeyCode::Char('j' | 'k') | KeyCode::Down | KeyCode::Up => *yes = !*yes,
                 // x again = confirm the delete
@@ -1277,6 +1290,13 @@ impl App {
         }
     }
 
+    fn submit_new_file_at(&mut self, dir: &std::path::Path, name: &str) {
+        match crate::files::create_in(&mut self.tree, dir, name) {
+            Ok(path) => self.open_file(path),
+            Err(e) => self.status = Some(e),
+        }
+    }
+
     /// Ctrl+O in the editor: follow the `[[wikilink]]` or `[text](url)`
     /// under the cursor. Wikilinks reuse `open_file` (autosave-out
     /// included, already-open switches tab); a missing wikilink target
@@ -1313,8 +1333,11 @@ impl App {
     }
 
     /// Open the wikilink `target` (sibling dir first, then the tree
-    /// root, `.md` appended when extensionless), jumping to `heading`
-    /// when present; offer creation when nothing resolves.
+    /// root, `.md` appended when extensionless; a leading `/` anchors
+    /// at the root), jumping to `heading` when present; offer creation
+    /// via `NewFileAt` (root-anchored, so the file lands where the
+    /// prefill says) when nothing resolves, or refuse when the target
+    /// would escape the vault.
     fn follow_wikilink(
         &mut self,
         root: &std::path::Path,
@@ -1329,16 +1352,36 @@ impl App {
                 self.jump_to_heading(h);
             }
         } else {
-            // the first resolution candidate, even though it doesn't
-            // exist yet — submitting the prompt creates it via the
-            // existing new-file flow
-            let mut would_be = file_dir.join(target);
-            if std::path::Path::new(target).extension().is_none() {
+            // the first resolution candidate, normalized so `..` can't
+            // smuggle an uncreatable prefill past `files::create_in`
+            // (which rejects `..`), and spelled exactly like `resolve`
+            // would return it. Creation is anchored at the vault root
+            // via `NewFileAt`, so the file lands where the prefill says
+            // whatever the tree selection is.
+            let (p, base): (&std::path::Path, &std::path::Path) = match target.strip_prefix('/') {
+                Some("") => {
+                    self.status = Some(format!("can't create '{target}'"));
+                    return;
+                }
+                Some(rest) => (std::path::Path::new(rest), root),
+                None => (std::path::Path::new(target), file_dir),
+            };
+            let mut would_be = crate::links::normalize_lexical(&base.join(p));
+            if p.extension().is_none() {
                 would_be.set_extension("md");
             }
-            let prefill = crate::fuzzy::rel_display(root, &would_be);
-            self.status = Some(format!("no note '{target}' — Enter creates, Esc cancels"));
-            self.prompt = Prompt::NewFile(prefill);
+            if would_be.starts_with(root) {
+                let prefill = crate::fuzzy::rel_display(root, &would_be);
+                self.status = Some(format!(
+                    "no note '{target}' — Enter creates {prefill}, Esc cancels"
+                ));
+                self.prompt = Prompt::NewFileAt {
+                    input: prefill,
+                    dir: root.to_path_buf(),
+                };
+            } else {
+                self.status = Some(format!("can't create '{target}' outside the vault"));
+            }
         }
     }
 

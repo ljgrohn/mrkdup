@@ -1948,26 +1948,108 @@ fn ctrl_o_missing_link_offers_create_and_submit_creates() {
     open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
     app.handle_key(ctrl('o'));
     assert!(
-        matches!(&app.prompt, Prompt::NewFile(s) if s == "notes/new.md"),
+        matches!(&app.prompt, Prompt::NewFileAt{input, ..} if input == "notes/new.md"),
         "unexpected prompt: {:?}",
         match &app.prompt {
-            Prompt::NewFile(s) => s.clone(),
-            _ => "<not a NewFile prompt>".into(),
+            Prompt::NewFileAt { input, .. } => input.clone(),
+            _ => "<not a NewFileAt prompt>".into(),
         }
     );
     assert!(app
         .status
         .as_deref()
-        .is_some_and(|s| s.contains("no note 'new'")));
-    // the tree selection decides where `files::create` puts a relative
-    // name: pin it to a root-level file so the prefill lands at the root
-    assert!(app.tree.select_path(&root.join("shared.md")));
+        .is_some_and(|s| s.contains("no note 'new'") && s.contains("notes/new.md")));
+    // the create offer is anchored at the vault root, not the tree
+    // selection: park the selection on the `sib/` dir and the file
+    // must still land in `notes/` where the prefill says
+    assert!(app.tree.select_path(&root.join("sib")));
     app.handle_key(key(KeyCode::Enter));
     assert!(matches!(app.prompt, Prompt::None));
     assert!(root.join("notes/new.md").exists());
+    assert!(!root.join("sib/notes/new.md").exists());
     assert_eq!(
         app.tab().unwrap().editor.path.as_deref(),
         Some(root.join("notes/new.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_o_dotdot_link_offers_creatable_sibling_prefill() {
+    // `[[../sib/new]]` from `notes/a.md`: the prefill is normalized to
+    // `sib/new.md` (no `..` for `files::create_in` to reject) and the
+    // submit creates exactly there
+    let root = link_vault("dotdot", "see [[../sib/new]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert!(
+        matches!(&app.prompt, Prompt::NewFileAt{input, ..} if input == "sib/new.md"),
+        "unexpected prompt: {:?}",
+        match &app.prompt {
+            Prompt::NewFileAt { input, .. } => input.clone(),
+            _ => "<not a NewFileAt prompt>".into(),
+        }
+    );
+    app.handle_key(key(KeyCode::Enter));
+    assert!(matches!(app.prompt, Prompt::None));
+    assert!(root.join("sib/new.md").exists());
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("sib/new.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_o_escaping_create_is_refused_without_a_prompt() {
+    // `[[../../outside]]` from `notes/a.md` would land above the vault:
+    // no prompt, just a status (creating files outside the vault behind
+    // a link-follow would be a surprise)
+    let root = link_vault("escape", "see [[../../outside]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert!(matches!(app.prompt, Prompt::None));
+    assert_eq!(
+        app.status.as_deref(),
+        Some("can't create '../../outside' outside the vault")
+    );
+    assert_eq!(app.tabs.len(), 1);
+}
+
+#[test]
+fn ctrl_o_absolute_target_anchors_at_root() {
+    // `[[/shared]]` opens the vault-root note, never the filesystem
+    // absolute (resolving it outside the vault would break the
+    // vault-is-the-truth model `follow_md_url` already honors)
+    let root = link_vault("abswiki", "see [[/shared]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("shared.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_o_dotdot_follow_stores_one_normalized_tab() {
+    // following `[[../sib/c]]` twice must switch to the same tab, not
+    // stack `notes/../sib/c.md` next to `sib/c.md`
+    let root = link_vault("dedup", "see [[../sib/c]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("sib/c.md").as_path())
+    );
+    app.open_file(root.join("notes/a.md")); // already open: switches back
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(app.tabs.len(), 2);
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("sib/c.md").as_path())
     );
 }
 
@@ -2002,9 +2084,11 @@ fn ctrl_o_md_link_follows_relative_and_refuses_remote() {
     let mut app = App::new(root.clone(), Config::default()).unwrap();
     open_at_link(&mut app, &root, "notes/a.md", "../sib/c.md", 1);
     app.handle_key(ctrl('o'));
-    // `..` resolves lexically, so normalize before comparing
-    let got = app.tab().unwrap().editor.path.clone().unwrap();
-    assert_eq!(std::fs::canonicalize(&got).unwrap(), root.join("sib/c.md"));
+    // `..` resolves to a normalized path, so it compares directly
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("sib/c.md").as_path())
+    );
     // remote urls report instead of opening anything
     let root = link_vault("mdremote", "see [t](https://x)\n");
     let mut app = App::new(root.clone(), Config::default()).unwrap();

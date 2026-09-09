@@ -67,6 +67,51 @@ fn resolve_prefers_sibling_dir_then_root_and_adds_md() {
 }
 
 #[test]
+fn normalize_lexical_resolves_dots_without_touching_disk() {
+    assert_eq!(
+        normalize_lexical(Path::new("/vault/notes/../sib/c.md")),
+        Path::new("/vault/sib/c.md")
+    );
+    assert_eq!(
+        normalize_lexical(Path::new("/vault/./notes/b.md")),
+        Path::new("/vault/notes/b.md")
+    );
+    assert_eq!(
+        normalize_lexical(Path::new("/vault/notes")),
+        Path::new("/vault/notes")
+    );
+    // nothing left to pop: kept, so escaping paths stay recognizable
+    assert_eq!(
+        normalize_lexical(Path::new("/vault/../../x.md")),
+        Path::new("/../x.md")
+    );
+}
+
+#[test]
+fn resolve_anchors_leading_slash_at_root() {
+    let root = std::path::Path::new("/vault");
+    let dir = std::path::Path::new("/vault/notes");
+    let exists = |p: &std::path::Path| p == Path::new("/vault/abs.md");
+    // never the filesystem absolute, even when it exists there
+    assert_eq!(
+        resolve("/abs", dir, root, &exists).unwrap(),
+        Path::new("/vault/abs.md")
+    );
+    assert!(resolve("/", dir, root, &exists).is_none());
+}
+
+#[test]
+fn resolve_returns_normalized_paths() {
+    let root = std::path::Path::new("/vault");
+    let dir = std::path::Path::new("/vault/notes");
+    let exists = |p: &std::path::Path| p == Path::new("/vault/sib/c.md");
+    assert_eq!(
+        resolve("../sib/c", dir, root, &exists).unwrap(),
+        Path::new("/vault/sib/c.md")
+    );
+}
+
+#[test]
 fn backlink_matches_all_three_forms_only() {
     assert!(backlink_matches("see [[plan]]", "plan"));
     assert!(backlink_matches("see [[plan|P]]", "plan"));
