@@ -772,8 +772,8 @@ impl App {
     /// says why).
     ///
     /// `path` is canonicalized on the way in, so every entry point —
-    /// the tree, the go-to-file and backlinks pickers, a link follow,
-    /// the CLI argument — agrees on one spelling and `tab_index` can
+    /// the tree, the go-to-file and backlinks pickers, a link follow —
+    /// agrees on one spelling and `tab_index` can
     /// key tabs by plain path equality. Without it a symlinked
     /// `alias.md` opened from the tree and a `[[b]]` resolving to its
     /// target would be two buffers on one inode, racing on autosave.

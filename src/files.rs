@@ -95,8 +95,24 @@ pub fn move_to(
     if target.exists() {
         return Err("a file with that name is already there".into());
     }
-    // the tab's spelling of `src`, captured while `src` still resolves
-    let open_as = crate::fsutil::canonical(src.to_path_buf());
+    // The tab's spelling of `src`, captured while `src` still
+    // resolves. `fs::rename` moves a symlink and leaves its target
+    // alone, so for a symlink row the canonical path is the *wrong*
+    // thing to match: it names the target, and redirecting on it would
+    // drag the tab holding the real file onto the moved link (which,
+    // if relative, now dangles). Match the raw spelling instead, so
+    // only a tab opened at that exact link path is redirected. An
+    // unreadable metadata is treated as "assume symlink" — the
+    // conservative choice, since it claims no match with the target.
+    let is_symlink = src
+        .symlink_metadata()
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(true);
+    let open_as = if is_symlink {
+        src.to_path_buf()
+    } else {
+        crate::fsutil::canonical(src.to_path_buf())
+    };
     std::fs::rename(src, &target).map_err(|e| format!("move failed: {e}"))?;
     redirect(tabs, &open_as, &target);
     tree.refresh();
@@ -116,11 +132,24 @@ pub fn delete(tree: &mut Tree, path: &Path) -> Result<String, String> {
 /// Point every tab that has `from` open at `to` instead.
 ///
 /// Tab paths are canonical (`App::open_file` stores them that way), so
-/// both sides are canonicalized: `from` by the caller *before* the
-/// move — afterwards the old path no longer resolves — and `to` here,
-/// so a redirected tab stays stored under the spelling `tab_index`
-/// dedups on. Renaming a symlink therefore leaves a tab opened through
-/// it where it is: the link moved, the file it has open did not.
+/// `to` is canonicalized here, keeping a redirected tab stored under
+/// the spelling `tab_index` dedups on. `from` is whatever spelling the
+/// caller captured *before* the move — afterwards the old path no
+/// longer resolves — and the two callers capture it differently,
+/// because `fs::rename` moves a symlink and leaves its target alone:
+///
+/// - `rename` always passes `canonical(src)`. The link stays in its
+///   own directory, so for a symlink row that canonical path is the
+///   target both before and after; the match is exact and the tab is
+///   rewritten to the same value it already had. Renaming the real
+///   file redirects the tab, whether it was opened through the link or
+///   at the file.
+/// - `move_to` passes `canonical(src)` only when `src` is not itself a
+///   symlink, and the raw `src` when it is. Moving a symlink therefore
+///   redirects only a tab opened at that exact link spelling (which
+///   `open_file` never produces) and leaves a tab holding the real
+///   file pointing at live content. Moving the real file redirects the
+///   tab as usual.
 fn redirect(tabs: &mut [Tab], from: &Path, to: &Path) {
     let to = crate::fsutil::canonical(to.to_path_buf());
     for tab in tabs {

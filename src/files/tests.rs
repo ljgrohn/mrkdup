@@ -190,3 +190,38 @@ fn rename_redirects_a_tab_opened_through_a_symlink() {
         Some(root.join("z.md").as_path())
     );
 }
+
+/// Moving a symlink moves the link and leaves its target alone, so a
+/// tab holding the real file must not be repointed at the moved link —
+/// with a relative link that path dangles, and the tab would be off
+/// live content entirely.
+#[test]
+#[cfg(unix)]
+fn move_to_a_symlink_leaves_the_tab_on_its_target() {
+    let root = fixture("move-symlink");
+    fs::create_dir_all(root.join("sub")).unwrap();
+    // relative, so the link dangles once moved into `sub`
+    std::os::unix::fs::symlink("a.md", root.join("alias.md")).unwrap();
+    let mut tree = Tree::new(root.clone()).unwrap();
+    let mut editor = Editor::new();
+    // what `App::open_file` stores for either spelling
+    editor.path = Some(crate::fsutil::canonical(root.join("alias.md")));
+    assert_eq!(editor.path.as_deref(), Some(root.join("a.md").as_path()));
+    let mut tabs = vec![Tab::new(editor)];
+
+    move_to(
+        &mut tree,
+        &mut tabs,
+        &root.join("alias.md"),
+        &root.join("sub"),
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(
+        tabs[0].editor.path.as_deref(),
+        Some(root.join("a.md").as_path()),
+        "moving the link must not repoint the tab holding its target"
+    );
+    assert!(root.join("a.md").is_file(), "the real file did not move");
+}
