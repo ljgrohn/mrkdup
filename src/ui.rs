@@ -94,7 +94,7 @@ fn draw_popup(f: &mut Frame, app: &mut App, area: Rect) {
         };
         f.render_widget(Paragraph::new(lines), padded);
     }
-    if let Prompt::NewFile(input) = &app.prompt {
+    if let Prompt::NewFile { input, .. } = &app.prompt {
         draw_input_popup(f, area, " New file ", input, theme);
     }
     if let Prompt::Search(input) = &app.prompt {
@@ -104,6 +104,7 @@ fn draw_popup(f: &mut Frame, app: &mut App, area: Rect) {
         draw_input_popup(f, area, " Rename ", input, theme);
     }
     if let Prompt::GoToFile {
+        title,
         input,
         candidates,
         selected,
@@ -119,12 +120,13 @@ fn draw_popup(f: &mut Frame, app: &mut App, area: Rect) {
             .max()
             .unwrap_or(0)
             .max(input.len() + 8)
+            .max(title.len())
             .max(40) as u16
             + 4;
         let height = (visible as u16 + 3).min(area.height); // borders + input line
         let popup = centered_rect(width, height, area);
         f.render_widget(Clear, popup);
-        let block = popup_block(" Go to file ", theme);
+        let block = popup_block(title, theme);
         let inner = block.inner(popup);
         f.render_widget(block, popup);
         let mut lines = vec![Line::from(vec![
@@ -338,6 +340,16 @@ fn open_marker_index(rows: &[crate::tree::Row], open: Option<&std::path::Path>) 
     if let Some(i) = rows.iter().position(|r| r.path == open) {
         return Some(i);
     }
+    // `open` is canonical (`App::open_file`) while the tree walk lists a
+    // symlink under the link's own name, so a file opened through one
+    // matches no row by spelling: canonicalize the file rows too. Costs
+    // one stat per file row, and only when the cheap pass above missed.
+    if let Some(i) = rows
+        .iter()
+        .position(|r| !r.is_dir && crate::fsutil::canonical(r.path.clone()) == open)
+    {
+        return Some(i);
+    }
     rows.iter()
         .enumerate()
         .filter(|(_, r)| r.is_dir && open.starts_with(&r.path))
@@ -439,6 +451,7 @@ fn key_lines() -> Vec<Line<'static>> {
         ("?", "help"),
         ("s", "settings"),
         ("Ctrl+W", "close tab"),
+        ("Ctrl+O", "follow link under cursor"),
         ("Opt+H / Opt+L", "prev / next tab"),
         ("q", "quit"),
     ];
@@ -448,12 +461,10 @@ fn key_lines() -> Vec<Line<'static>> {
 }
 
 /// The cheat sheet, shown centered and dim in the editor pane until the
-/// first file opens.
+/// first file opens. No blank line under the title: the sheet is
+/// exactly as tall as a small terminal fits, so every row counts.
 fn draw_welcome(f: &mut Frame, area: Rect, theme: &Theme) {
-    let mut lines = vec![
-        Line::from("mrkdup").alignment(Alignment::Center),
-        Line::from(""),
-    ];
+    let mut lines = vec![Line::from("mrkdup").alignment(Alignment::Center)];
     lines.extend(key_lines());
     let width = lines.iter().map(|l| l.width()).max().unwrap_or(0) as u16;
     let rect = centered_rect(width, lines.len() as u16, area);
@@ -491,9 +502,13 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         Focus::Editor => " EDIT ",
     };
     let text = match &app.prompt {
-        Prompt::NewFile(_) => {
-            format!("{mode}| type a name (dir/name.md works) · Enter create · Esc cancel")
-        }
+        Prompt::NewFile { .. } => match &app.status {
+            // a link-follow create offer explains itself here
+            Some(msg) => format!("{mode}| {msg}"),
+            None => {
+                format!("{mode}| type a name (dir/name.md works) · Enter create · Esc cancel")
+            }
+        },
         Prompt::Help => format!("{mode}| any key closes"),
         Prompt::Search(_) => format!("{mode}| Enter jump · Esc cancel"),
         Prompt::Rename { .. } => format!("{mode}| type the new name · Enter rename · Esc cancel"),

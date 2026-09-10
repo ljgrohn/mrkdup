@@ -10,6 +10,7 @@ mod fsutil;
 mod fuzzy;
 mod highlight;
 mod layout_cache;
+mod links;
 mod render;
 mod search;
 mod tab;

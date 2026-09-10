@@ -745,6 +745,118 @@ fn html_tag_gt_in_quotes_still_opens_embed() {
     assert_eq!(kind_of(src[1], &s[1], "let"), Kind::Keyword);
 }
 
+// ---- wikilinks ------------------------------------------------------
+
+#[test]
+fn wikilink_plain_paints_mark_and_link_text() {
+    let line = "a [[plan]] b";
+    let s = hl(&[line]);
+    assert_eq!(
+        pieces(line, &s[0]),
+        vec![
+            (Kind::Text, "a ".into()),
+            (Kind::Mark, "[[".into()),
+            (Kind::LinkText, "plan".into()),
+            (Kind::Mark, "]]".into()),
+            (Kind::Text, " b".into()),
+        ]
+    );
+    assert_covers(&s[0], line.chars().count());
+}
+
+#[test]
+fn wikilink_alias_splits_on_pipe() {
+    let line = "a [[plan|P]] b";
+    let s = hl(&[line]);
+    assert_eq!(
+        pieces(line, &s[0]),
+        vec![
+            (Kind::Text, "a ".into()),
+            (Kind::Mark, "[[".into()),
+            (Kind::LinkText, "plan".into()),
+            (Kind::Mark, "|".into()),
+            (Kind::LinkText, "P".into()),
+            (Kind::Mark, "]]".into()),
+            (Kind::Text, " b".into()),
+        ]
+    );
+    assert_covers(&s[0], line.chars().count());
+}
+
+#[test]
+fn wikilink_heading_is_one_link_text_span() {
+    let line = "a [[p#H]] b";
+    let s = hl(&[line]);
+    assert_eq!(
+        pieces(line, &s[0]),
+        vec![
+            (Kind::Text, "a ".into()),
+            (Kind::Mark, "[[".into()),
+            (Kind::LinkText, "p#H".into()),
+            (Kind::Mark, "]]".into()),
+            (Kind::Text, " b".into()),
+        ]
+    );
+    assert_covers(&s[0], line.chars().count());
+}
+
+#[test]
+fn wikilink_unclosed_and_empty_yield_no_link_spans() {
+    for line in ["a [[oops b", "a [[]] b", "a [[|alias]] b"] {
+        let s = hl(&[line]);
+        assert!(
+            !s[0].iter().any(|t| t.kind == Kind::LinkText),
+            "{line}: {:?}",
+            s[0]
+        );
+        assert_covers(&s[0], line.chars().count());
+    }
+}
+
+#[test]
+fn wikilink_inside_code_stays_code() {
+    let line = "`[[plan]]` x";
+    let s = hl(&[line]);
+    assert!(s[0].iter().any(|t| t.kind == Kind::CodeInline));
+    assert!(!s[0].iter().any(|t| t.kind == Kind::LinkText));
+    assert_covers(&s[0], line.chars().count());
+}
+
+#[test]
+fn wikilink_highlight_agrees_with_parser() {
+    let lines = [
+        "a [[plan]] b",
+        "a [[plan|P]] b",
+        "a [[p#H]] b",
+        "[[a [[b]]",
+        "[[[[b]]",
+        "[[a](b)]]",
+        "x [[a]] y [[b|B]] z",
+        "a [[oops b",
+        "a [[]] b",
+        "a [[|alias]] b",
+    ];
+    for line in lines {
+        let chars: Vec<char> = line.chars().collect();
+        let spans = &hl(&[line])[0];
+        let painted_opens: Vec<usize> = spans
+            .iter()
+            .filter(|t| {
+                t.kind == Kind::Mark
+                    && t.end == t.start + 2
+                    && chars[t.start] == '['
+                    && chars[t.start + 1] == '['
+            })
+            .map(|t| t.start)
+            .collect();
+        let parsed_opens: Vec<usize> = crate::links::wikilinks(line)
+            .iter()
+            .map(|w| w.start)
+            .collect();
+        assert_eq!(painted_opens, parsed_opens, "{line}");
+    }
+}
+
 #[test]
 fn html_embed_css_comments_and_js_templates_span_lines() {
     let src = [

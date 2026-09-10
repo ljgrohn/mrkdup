@@ -24,7 +24,14 @@ pub enum Prompt {
     None,
     /// The key cheat sheet, drawn over the editor pane; any key closes it.
     Help,
-    NewFile(String),
+    /// The new-file input; `dir` is where the typed (relative) name
+    /// lands — the tree selection for `n`, the vault root for a
+    /// link-follow create offer — fixed when the prompt opens so the
+    /// file goes where the popup implied whatever the tree does later.
+    NewFile {
+        input: String,
+        dir: PathBuf,
+    },
     Search(String),
     ConfirmDelete {
         path: PathBuf,
@@ -40,6 +47,8 @@ pub enum Prompt {
         input: String,
     },
     GoToFile {
+        /// Popup title, e.g. ` Go to file ` or ` links to plan (3) `.
+        title: String,
         input: String,
         /// (root-relative display path, absolute path), collected once
         /// when the popup opens.
@@ -499,7 +508,12 @@ impl App {
             KeyCode::Char('s') if key.modifiers.is_empty() => self.open_settings(),
             KeyCode::Char('-') => self.tree.ascend(),
             KeyCode::Char('+') => self.tree.make_root(),
-            KeyCode::Char('n') => self.prompt = Prompt::NewFile(String::new()),
+            KeyCode::Char('n') => {
+                self.prompt = Prompt::NewFile {
+                    input: String::new(),
+                    dir: crate::files::selected_dir(&self.tree),
+                }
+            }
             KeyCode::Char('x' | 'X') => self.confirm_delete(),
             KeyCode::Char('m') => self.start_move(),
             KeyCode::Char('r') => self.start_rename(),
@@ -579,6 +593,7 @@ impl App {
         let candidates =
             crate::fuzzy::collect_candidates(self.tree.root(), self.tree.show_hidden());
         self.prompt = Prompt::GoToFile {
+            title: " Go to file ".to_string(),
             input: String::new(),
             candidates,
             selected: 0,
@@ -726,7 +741,10 @@ impl App {
         match crate::files::delete(&mut self.tree, &path) {
             Ok(status) => {
                 self.status = Some(status);
-                // the file is gone: drop its tab without saving
+                // the file is gone: drop its tab without saving.
+                // `path` is a tree row, so already canonical unless it
+                // named a symlink — and deleting a symlink leaves the
+                // tab's real file alone, so missing there is correct.
                 if let Some(i) = self.tab_index(&path) {
                     self.remove_tab(i);
                 }
@@ -749,16 +767,29 @@ impl App {
 
     /// Open `path` in a new tab right of the active one and focus the
     /// editor — or, if it's already open, just switch to that tab. The
-    /// tab being left autosaves on the way out.
-    fn open_file(&mut self, path: PathBuf) {
+    /// tab being left autosaves on the way out. Returns whether `path`
+    /// is now the active tab (false when the read failed; `status` then
+    /// says why).
+    ///
+    /// `path` is canonicalized on the way in, so every entry point —
+    /// the tree, the go-to-file and backlinks pickers, a link follow —
+    /// agrees on one spelling and `tab_index` can
+    /// key tabs by plain path equality. Without it a symlinked
+    /// `alias.md` opened from the tree and a `[[b]]` resolving to its
+    /// target would be two buffers on one inode, racing on autosave.
+    /// Everything downstream may therefore assume `editor.path` is the
+    /// filesystem's own spelling (see `files::redirect`,
+    /// `ui::open_marker_index`).
+    fn open_file(&mut self, path: PathBuf) -> bool {
+        let path = crate::fsutil::canonical(path);
         if let Some(i) = self.tab_index(&path) {
             self.activate_tab(i);
-            return;
+            return true;
         }
         let mut editor = Editor::new();
         if let Err(e) = editor.open(&path) {
             self.status = Some(format!("open failed: {e}"));
-            return;
+            return false;
         }
         self.autosave_active();
         let at = if self.tabs.is_empty() {
@@ -771,6 +802,7 @@ impl App {
         self.focus = Focus::Editor;
         self.editor_visible = true;
         self.pending_quit = false;
+        true
     }
 
     /// The tab showing `path`, if any.
@@ -915,6 +947,8 @@ impl App {
                     self.search_next(&q);
                 }
             }
+            (true, KeyCode::Char('o')) => self.follow_link_under_cursor(),
+            (true, KeyCode::Char('l')) => self.show_backlinks(),
             // crate defaults are Ctrl+U/Ctrl+R with Ctrl+Y = paste;
             // intercept so the advertised keys work
             (true, KeyCode::Char('z')) => {
@@ -1099,6 +1133,7 @@ impl App {
                 input,
                 candidates,
                 selected,
+                ..
             } = &mut self.prompt
             {
                 let n = crate::fuzzy::fuzzy_filter(input, candidates).len();
@@ -1117,28 +1152,30 @@ impl App {
         match &mut self.prompt {
             // the cheat sheet: any key closes it and is otherwise consumed
             Prompt::Help => self.prompt = Prompt::None,
-            Prompt::NewFile(s) | Prompt::Search(s) => match key.code {
-                KeyCode::Backspace => {
-                    s.pop();
-                }
-                KeyCode::Char(c) => s.push(c),
-                KeyCode::Enter => {
-                    match std::mem::replace(&mut self.prompt, Prompt::None) {
-                        Prompt::NewFile(name) => self.submit_new_file(&name),
-                        Prompt::Search(query) => {
-                            // empty submit repeats the previous search
-                            let q = if query.is_empty() {
-                                self.last_search.clone()
-                            } else {
-                                query
-                            };
-                            self.search_next(&q);
-                        }
-                        _ => {}
+            Prompt::NewFile { input: s, .. } | Prompt::Search(s) => {
+                match key.code {
+                    KeyCode::Backspace => {
+                        s.pop();
                     }
+                    KeyCode::Char(c) => s.push(c),
+                    KeyCode::Enter => {
+                        match std::mem::replace(&mut self.prompt, Prompt::None) {
+                            Prompt::NewFile { input, dir } => self.submit_new_file(&dir, &input),
+                            Prompt::Search(query) => {
+                                // empty submit repeats the previous search
+                                let q = if query.is_empty() {
+                                    self.last_search.clone()
+                                } else {
+                                    query
+                                };
+                                self.search_next(&q);
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
             Prompt::ConfirmDelete { path, yes } => match key.code {
                 KeyCode::Char('j' | 'k') | KeyCode::Down | KeyCode::Up => *yes = !*yes,
                 // x again = confirm the delete
@@ -1174,6 +1211,7 @@ impl App {
                 input,
                 candidates,
                 selected,
+                ..
             } => match key.code {
                 KeyCode::Backspace => {
                     input.pop();
@@ -1241,10 +1279,180 @@ impl App {
         }
     }
 
-    fn submit_new_file(&mut self, name: &str) {
-        match crate::files::create(&mut self.tree, name) {
-            Ok(path) => self.open_file(path),
+    fn submit_new_file(&mut self, dir: &std::path::Path, name: &str) {
+        match crate::files::create(&mut self.tree, dir, name) {
+            Ok(path) => {
+                self.open_file(path);
+            }
             Err(e) => self.status = Some(e),
+        }
+    }
+
+    /// Ctrl+O in the editor: follow the `[[wikilink]]` or `[text](url)`
+    /// under the cursor. Wikilinks reuse `open_file` (autosave-out
+    /// included, already-open switches tab); a missing wikilink target
+    /// offers creation via a prefilled `Prompt::NewFile`. Every no-op
+    /// sets `status` so the key never silently does nothing. Only runs
+    /// with no popup open (`handle_key` routes prompt input elsewhere).
+    fn follow_link_under_cursor(&mut self) {
+        if self.tabs.is_empty() {
+            self.no_file_status();
+            return;
+        }
+        // owned copies first: `open_file` needs `&mut self`
+        let cur = self.tabs.get(self.active).and_then(|tab| {
+            let (row, col) = tab.editor.cursor();
+            let line = tab.editor.current_line()?.to_string();
+            Some((tab.editor.path.clone()?, row, col, line))
+        });
+        let Some((cur_path, _row, col, line)) = cur else {
+            self.status = Some("no link under cursor".into());
+            return;
+        };
+        let root = self.tree.root().to_path_buf();
+        let file_dir = cur_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| root.clone());
+        if let Some(w) = crate::links::parse_wikilink_at(&line, col) {
+            self.follow_wikilink(&root, &file_dir, &w.target, w.heading.as_deref());
+        } else if let Some(m) = crate::links::parse_md_link_at(&line, col) {
+            self.follow_md_url(&root, &file_dir, &m.url);
+        } else {
+            self.status = Some("no link under cursor".into());
+        }
+    }
+
+    /// Open the wikilink `target` (sibling dir first, then the tree
+    /// root, `.md` appended unless the target already ends in `.md`; a
+    /// leading `/` anchors at the root), jumping to `heading` when
+    /// present; offer creation via `NewFile` (root-anchored, so the
+    /// file lands where the prefill says) when nothing resolves, or
+    /// refuse when the target would escape the vault.
+    fn follow_wikilink(
+        &mut self,
+        root: &std::path::Path,
+        file_dir: &std::path::Path,
+        target: &str,
+        heading: Option<&str>,
+    ) {
+        let exists = |p: &std::path::Path| p.is_file();
+        if let Some(path) = crate::links::resolve(target, file_dir, root, &exists) {
+            if self.open_file(path) {
+                if let Some(h) = heading {
+                    self.jump_to_heading(h);
+                }
+            }
+        } else {
+            // creation is anchored at the vault root via `NewFile`, so
+            // the file lands where the prefill says whatever the tree
+            // selection is
+            match crate::links::create_target(target, file_dir, root) {
+                Some(would_be) if would_be.starts_with(root) => {
+                    let prefill = crate::fuzzy::rel_display(root, &would_be);
+                    self.status = Some(format!(
+                        "no note '{target}' — Enter creates {prefill}, Esc cancels"
+                    ));
+                    self.prompt = Prompt::NewFile {
+                        input: prefill,
+                        dir: root.to_path_buf(),
+                    };
+                }
+                Some(_) => {
+                    self.status = Some(format!("can't create '{target}' outside the vault"));
+                }
+                None => self.status = Some(format!("can't create '{target}'")),
+            }
+        }
+    }
+
+    /// Open a local `[text](url)` target the same way wikilinks resolve
+    /// (`resolve` handles the leading `/`), then jump to its `#fragment`
+    /// heading if any; a bare `#fragment` jumps inside the current
+    /// file. Remote urls are refused with a status message, and unlike
+    /// wikilinks a miss never offers creation — it just reports.
+    fn follow_md_url(&mut self, root: &std::path::Path, file_dir: &std::path::Path, url: &str) {
+        if crate::links::is_remote_url(url) {
+            self.status = Some(format!("not a local file — {url}"));
+            return;
+        }
+        let (path, fragment) = crate::links::split_md_url(url);
+        let opened = if path.is_empty() && fragment.is_some() {
+            true // `#heading` alone: stay in this file
+        } else {
+            let exists = |p: &std::path::Path| p.is_file();
+            match crate::links::resolve(&path, file_dir, root, &exists) {
+                Some(p) => self.open_file(p),
+                None => {
+                    self.status = Some(format!("no file '{url}'"));
+                    false
+                }
+            }
+        };
+        if opened {
+            if let Some(h) = fragment {
+                self.jump_to_heading(&h);
+            }
+        }
+    }
+
+    /// Ctrl+L in the editor: list the notes linking to the open file
+    /// ("what links here") in the go-to-file picker, titled with the
+    /// note and the count. The scan runs per press over the same files
+    /// the go-to-file picker lists, resolving each `[[link]]` the way
+    /// Ctrl+O would, so it is always fresh; the current file is
+    /// excluded even if it self-links. An empty result just sets
+    /// `status` (no popup), and every no-op sets `status` so the key
+    /// never silently does nothing. Only runs with no popup open
+    /// (`handle_key` routes prompt input elsewhere).
+    fn show_backlinks(&mut self) {
+        let cur = self
+            .tabs
+            .get(self.active)
+            .and_then(|tab| tab.editor.path.clone());
+        let Some(path) = cur else {
+            self.no_file_status();
+            return;
+        };
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let root = self.tree.root().to_path_buf();
+        let candidates = crate::links::backlinks(&root, self.tree.show_hidden(), &path);
+        if candidates.is_empty() {
+            self.status = Some(format!("no links to '{stem}' yet"));
+            return;
+        }
+        self.prompt = Prompt::GoToFile {
+            title: format!(" links to {stem} ({}) ", candidates.len()),
+            input: String::new(),
+            candidates,
+            selected: 0,
+        };
+    }
+
+    /// After following a `[[t#H]]` link (or a `path#H` markdown link):
+    /// land on the heading `H` (`links::heading_row`) with the view
+    /// following the cursor again (a wheel scroll may have parked it),
+    /// or note the miss.
+    fn jump_to_heading(&mut self, heading: &str) {
+        let Some(tab) = self.tabs.get_mut(self.active) else {
+            return;
+        };
+        match crate::links::heading_row(tab.editor.lines(), heading) {
+            Some(r) => {
+                tab.follow_cursor = true;
+                // set_cursor guards the u16::MAX bound that Jump takes
+                if !tab.editor.set_cursor(r, 0) {
+                    self.status = Some("heading is beyond line 65535 — cannot jump".into());
+                    return;
+                }
+                tab.editor.cancel_selection();
+            }
+            None => {
+                self.status = Some(format!("note opened; heading '{heading}' not found"));
+            }
         }
     }
 

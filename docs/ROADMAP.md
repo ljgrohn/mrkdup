@@ -9,43 +9,42 @@ live in `docs/superpowers/plans/`.
 The larger feature ideas (agent-launch, git awareness, checkbox index)
 are deferred — not planned at this time.
 
-## Small follow-ups (from the v0.2.0 review)
+## Proposed
 
-Correctness / edge cases:
+- [ ] Share one `[text](url)` tokenizer between `src/highlight.rs` and
+  `links::parse_md_link_at`, mirroring `links::wikilink_span` — they
+  hand-roll the same bracket rules today and agree only by inspection.
+- [ ] Count local `[text](path)` links as backlinks in
+  `links::backlinks`, not just `[[wikilinks]]` — `Ctrl+O` follows both
+  but `Ctrl+L` counts only wikilinks.
+- [ ] Tell the user when a backlink scan hit
+  `fuzzy::collect_candidates`' 5000-file cap; today the truncation is
+  silent, so an over-cap vault can report "no links yet" when links
+  exist.
+- [ ] Treat a single-colon scheme as remote in `links::is_remote_url`
+  (`tel:`, `obsidian:`): only `://` and `mailto:` are recognized today,
+  so `Ctrl+O` on one reports `no file '<url>'` instead of saying it is
+  not a local file.
+- [ ] Fold case properly in `links::may_name`: it compares with
+  `eq_ignore_ascii_case` and strips a case-sensitive `.md`, so on a
+  case-insensitive disk a note named `X.MD` gets no backlink from
+  `[[X]]`, and non-ASCII case never matches.
+- [ ] Decide whether the link-follow create offer should survive typing
+  (`src/ui.rs`): it reads `app.status`, which `App::handle_key` clears on
+  every keypress, so the explanation vanishes as soon as the user edits
+  the prefilled name.
+- [ ] Stop `files::move_to` silently replacing a dangling symlink at the
+  destination: its `target.exists()` check follows links, so the
+  `fs::rename` overwrites it (pre-existing, found during the wikilinks
+  review).
+- [ ] Cover the untested branches left by the wikilinks review:
+  `fsutil::canonical`'s failure fallback, `files::selected_dir`'s
+  no-selection case, the `heading is beyond line 65535` status, and
+  `follow_md_url`'s `no file '#'`. Tighten `links.rs`'s public surface
+  while there — `normalize_lexical` and `percent_decode` are `pub` with
+  no caller outside the module, and `MdLink`'s `start`/`end` are never
+  read.
 
-- [x] Treat deleted-on-disk as a conflict, not a clean save.
-  `disk_changed` returns `false` when either mtime is missing
-  (`src/editor.rs`), so a dirty buffer whose file was deleted elsewhere
-  saves without the usual conflict warning and silently recreates it.
-  Decide: missing disk file should count as changed.
-- [x] Document the trailing-newline normalization. `Editor::content`
-  always appends a final newline (`src/editor.rs`), so a file without
-  one gains one on first save. Likely intentional — say so in the
-  `## Saving model` README section.
-- [x] Reject trailing CLI args. `main` only inspects `args().nth(1)`
-  (`src/main.rs`), so `mrkdup dir extra` silently ignores `extra` and
-  `--help` after a directory is treated as a path.
+## Done
 
-Hardening (not defects):
-
-- [x] Harden `atomic_write` (`src/fsutil.rs`): fixed
-  `.NAME.mrkdup-tmp` name collides on concurrent saves of the same path
-  and litters a dotfile after a crash; no directory fsync after rename,
-  so the rename itself can be lost on some filesystems after a crash.
-- [x] Replace direct tab indexing with a graceful error. `ed()` /
-  `ed_ref()` index `self.tabs[self.active]` (`src/app.rs`) and panic if
-  no file is open; every current caller guards first, but a status-bar
-  error would fit the "never crash on bad input" ethos better than a
-  future missed guard. (The `expect("a file is open")` nearby is
-  `#[cfg(test)]` only — fine as is.)
-
-Docs drift:
-
-- [x] Fix stale `theme_name` doc comment (`src/config.rs`): says
-  "(`default`, `light`, `mono`)" but there are five builtins
-  (`firmitas`, `tokyonight` included). README is already correct.
-- [x] Clarify the README config example. The `ini` sample shows
-  non-default values (`autosave_seconds = 10`, `cursor_shape = block`,
-  `cursor_blink = off`, `cursor_color = orange`) directly above the
-  defaults table (`2` / `default` / `on` / `default`). Add a comment
-  that these are example values, not defaults.
+- [x] Obsidian-style local linking (see docs/superpowers/plans/2026-09-09-wikilinks.md).

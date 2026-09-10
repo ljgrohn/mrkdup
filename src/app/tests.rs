@@ -923,7 +923,7 @@ fn ctrl_p_does_not_fire_inside_another_prompt() {
     let mut app = App::new(fixture("gtf-nested"), Config::default()).unwrap();
     app.handle_key(key(KeyCode::Char('n'))); // NewFile prompt
     app.handle_key(ctrl('p'));
-    assert!(matches!(app.prompt, Prompt::NewFile(_)));
+    assert!(matches!(app.prompt, Prompt::NewFile { .. }));
 }
 
 #[test]
@@ -983,7 +983,7 @@ fn tick_idle_autosaves() {
 fn ctrl_q_quits_inside_newfile_prompt() {
     let mut app = App::new(fixture("prompt-quit-clean"), Config::default()).unwrap();
     app.handle_key(key(KeyCode::Char('n'))); // open NewFile prompt
-    assert!(matches!(app.prompt, Prompt::NewFile(_)));
+    assert!(matches!(app.prompt, Prompt::NewFile { .. }));
     app.handle_key(ctrl('q')); // Ctrl+Q should quit even inside prompt
     assert!(app.should_quit);
 }
@@ -1883,4 +1883,512 @@ fn wheel_over_a_stale_editor_rect_with_no_file_open_errors() {
     app.handle_mouse(mouse(MouseEventKind::ScrollDown, 40, 3));
     assert!(app.tabs.is_empty());
     assert_eq!(app.status.as_deref(), Some(NO_FILE));
+}
+
+/// Ctrl+O follow-link fixtures: a vault with a subdirectory, so
+/// sibling-dir vs root fallback resolution is exercisable.
+fn link_vault(tag: &str, a_content: &str) -> std::path::PathBuf {
+    let owned = std::env::temp_dir().join(format!("mrkdup-link-{tag}"));
+    let _ = fs::remove_dir_all(&owned);
+    let root = owned.join("root");
+    fs::create_dir_all(root.join("notes")).unwrap();
+    fs::create_dir_all(root.join("sib")).unwrap();
+    fs::write(root.join("notes/a.md"), a_content).unwrap();
+    fs::write(root.join("notes/b.md"), "# Target Head\nbody\n").unwrap();
+    fs::write(root.join("shared.md"), "shared\n").unwrap();
+    fs::write(root.join("sib/c.md"), "c\n").unwrap();
+    // canonicalize: the tree (and hence resolution) sees the real path,
+    // which on macOS differs from `temp_dir()` (`/var` → `/private/var`)
+    std::fs::canonicalize(&root).unwrap_or(root)
+}
+
+/// Open `rel` (root-relative) in the app and park the cursor at
+/// (row, char col of `needle` + `delta`), e.g. just inside a link.
+fn open_at_link(app: &mut App, root: &std::path::Path, rel: &str, needle: &str, delta: usize) {
+    app.open_file(root.join(rel));
+    let line = app.editor().lines()[0].clone();
+    let byte = line
+        .find(needle)
+        .unwrap_or_else(|| panic!("{needle:?} not in {line:?}"));
+    let col = line[..byte].chars().count() + delta;
+    assert!(app.tab_mut().unwrap().editor.set_cursor(0, col));
+}
+
+#[test]
+fn ctrl_o_with_no_link_under_cursor_sets_status_and_keeps_text() {
+    // Step 2 probe: Ctrl+O must reach app dispatch (textarea 0.9 binds
+    // nothing to it), so with plain text under the cursor it reports
+    // instead of typing or silently doing nothing.
+    let root = link_vault("nolink", "see [[b]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    app.open_file(root.join("notes/a.md"));
+    assert!(app.tab_mut().unwrap().editor.set_cursor(0, 0)); // on 's'
+    app.handle_key(ctrl('o'));
+    assert_eq!(app.status.as_deref(), Some("no link under cursor"));
+    assert_eq!(app.editor().lines(), ["see [[b]]"]);
+    assert_eq!(app.tabs.len(), 1); // opened nothing
+}
+
+#[test]
+fn ctrl_o_follow_link_opens_sibling() {
+    let root = link_vault("sibling", "see [[b]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("notes/b.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_o_missing_link_offers_create_and_submit_creates() {
+    let root = link_vault("missing", "see [[new]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert!(
+        matches!(&app.prompt, Prompt::NewFile{input, ..} if input == "notes/new.md"),
+        "unexpected prompt: {:?}",
+        match &app.prompt {
+            Prompt::NewFile { input, .. } => input.clone(),
+            _ => "<not a NewFile prompt>".into(),
+        }
+    );
+    assert!(app
+        .status
+        .as_deref()
+        .is_some_and(|s| s.contains("no note 'new'") && s.contains("notes/new.md")));
+    // the create offer is anchored at the vault root, not the tree
+    // selection: park the selection on the `sib/` dir and the file
+    // must still land in `notes/` where the prefill says
+    assert!(app.tree.select_path(&root.join("sib")));
+    app.handle_key(key(KeyCode::Enter));
+    assert!(matches!(app.prompt, Prompt::None));
+    assert!(root.join("notes/new.md").exists());
+    assert!(!root.join("sib/notes/new.md").exists());
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("notes/new.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_o_dotdot_link_offers_creatable_sibling_prefill() {
+    // `[[../sib/new]]` from `notes/a.md`: the prefill is normalized to
+    // `sib/new.md` (no `..` for `files::create` to reject) and the
+    // submit creates exactly there
+    let root = link_vault("dotdot", "see [[../sib/new]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert!(
+        matches!(&app.prompt, Prompt::NewFile{input, ..} if input == "sib/new.md"),
+        "unexpected prompt: {:?}",
+        match &app.prompt {
+            Prompt::NewFile { input, .. } => input.clone(),
+            _ => "<not a NewFile prompt>".into(),
+        }
+    );
+    app.handle_key(key(KeyCode::Enter));
+    assert!(matches!(app.prompt, Prompt::None));
+    assert!(root.join("sib/new.md").exists());
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("sib/new.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_o_escaping_create_is_refused_without_a_prompt() {
+    // `[[../../outside]]` from `notes/a.md` would land above the vault:
+    // no prompt, just a status (creating files outside the vault behind
+    // a link-follow would be a surprise)
+    let root = link_vault("escape", "see [[../../outside]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert!(matches!(app.prompt, Prompt::None));
+    assert_eq!(
+        app.status.as_deref(),
+        Some("can't create '../../outside' outside the vault")
+    );
+    assert_eq!(app.tabs.len(), 1);
+}
+
+#[test]
+fn ctrl_o_absolute_target_anchors_at_root() {
+    // `[[/shared]]` opens the vault-root note, never the filesystem
+    // absolute (resolving it outside the vault would break the
+    // vault-is-the-truth model `follow_md_url` already honors)
+    let root = link_vault("abswiki", "see [[/shared]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("shared.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_o_dotdot_follow_stores_one_normalized_tab() {
+    // following `[[../sib/c]]` twice must switch to the same tab, not
+    // stack `notes/../sib/c.md` next to `sib/c.md`
+    let root = link_vault("dedup", "see [[../sib/c]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("sib/c.md").as_path())
+    );
+    app.open_file(root.join("notes/a.md")); // already open: switches back
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(app.tabs.len(), 2);
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("sib/c.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_o_alias_link_opens_target() {
+    let root = link_vault("alias", "see [[b|Bee]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "Bee", 1);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("notes/b.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_o_heading_link_opens_target_at_heading_row() {
+    let root = link_vault("heading", "see [[b#Target Head]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("notes/b.md").as_path())
+    );
+    assert_eq!(app.editor().cursor(), (0, 0)); // the `# Target Head` line
+}
+
+#[test]
+fn ctrl_o_md_link_follows_relative_and_refuses_remote() {
+    let root = link_vault("mdlink", "see [t](../sib/c.md)\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "../sib/c.md", 1);
+    app.handle_key(ctrl('o'));
+    // `..` resolves to a normalized path, so it compares directly
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("sib/c.md").as_path())
+    );
+    // remote urls report instead of opening anything
+    let root = link_vault("mdremote", "see [t](https://x)\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "https://x", 1);
+    app.handle_key(ctrl('o'));
+    assert_eq!(app.status.as_deref(), Some("not a local file — https://x"));
+    assert_eq!(app.tabs.len(), 1);
+}
+
+#[test]
+fn ctrl_o_root_fallback_link_opens_root_file() {
+    let root = link_vault("rootfb", "see [[shared]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("shared.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_o_note_name_with_a_dot_opens_its_md_file() {
+    let root = link_vault("dotname", "see [[v1.2]]\n");
+    fs::write(root.join("notes/v1.2.md"), "release\n").unwrap();
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("notes/v1.2.md").as_path())
+    );
+}
+
+/// Ctrl+L backlinks fixture: `a.md` and `sub/c.md` link `[[b]]`,
+/// `sub/e.md` reaches it through a path (`[[../b]]`), `d.md` links
+/// elsewhere (so it is lonely), and `b.md` self-links (so the popup
+/// must exclude the current file).
+fn backlink_vault(tag: &str) -> std::path::PathBuf {
+    let owned = std::env::temp_dir().join(format!("mrkdup-backlink-{tag}"));
+    let _ = fs::remove_dir_all(&owned);
+    let root = owned.join("root");
+    fs::create_dir_all(root.join("sub")).unwrap();
+    fs::write(root.join("a.md"), "see [[b]]\n").unwrap();
+    fs::write(root.join("sub/c.md"), "see [[b#H]]\n").unwrap();
+    fs::write(root.join("sub/e.md"), "see [[../b]]\n").unwrap();
+    fs::write(root.join("d.md"), "see [[other]]\n").unwrap();
+    fs::write(root.join("b.md"), "self [[b]]\n").unwrap();
+    // canonicalize: the tree (and hence the scan) sees the real path,
+    // which on macOS differs from `temp_dir()` (`/var` → `/private/var`)
+    std::fs::canonicalize(&root).unwrap_or(root)
+}
+
+#[test]
+fn ctrl_l_backlinks_popup_lists_sorted_linkers_excluding_current_file() {
+    let root = backlink_vault("list");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    app.open_file(root.join("b.md"));
+    app.handle_key(ctrl('l'));
+    let Prompt::GoToFile {
+        title,
+        input,
+        candidates,
+        selected,
+    } = &app.prompt
+    else {
+        panic!("expected the picker, got status {:?}", app.status);
+    };
+    assert_eq!(title, " links to b (3) ");
+    assert_eq!(input, "");
+    assert_eq!(*selected, 0);
+    assert_eq!(candidates.len(), 3);
+    assert_eq!(candidates[0].0, "a.md");
+    assert_eq!(candidates[0].1, root.join("a.md"));
+    assert_eq!(candidates[1].0, "sub/c.md");
+    assert_eq!(candidates[1].1, root.join("sub/c.md"));
+    assert_eq!(candidates[2].0, "sub/e.md");
+    assert_eq!(candidates[2].1, root.join("sub/e.md"));
+}
+
+#[test]
+fn ctrl_l_backlinks_enter_opens_candidate_and_esc_closes() {
+    let root = backlink_vault("openesc");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    // Enter on the first candidate switches to its tab and clears it
+    app.open_file(root.join("b.md"));
+    app.handle_key(ctrl('l'));
+    app.handle_key(key(KeyCode::Enter));
+    assert!(matches!(app.prompt, Prompt::None));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("a.md").as_path())
+    );
+    // ↓ moves down; Enter opens the second hit
+    app.open_file(root.join("b.md")); // already open: just switches back
+    app.handle_key(ctrl('l'));
+    app.handle_key(key(KeyCode::Down));
+    app.handle_key(key(KeyCode::Enter));
+    assert!(matches!(app.prompt, Prompt::None));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("sub/c.md").as_path())
+    );
+    // Esc closes the popup without switching
+    app.open_file(root.join("b.md"));
+    app.handle_key(ctrl('l'));
+    assert!(matches!(app.prompt, Prompt::GoToFile { .. }));
+    app.handle_key(key(KeyCode::Esc));
+    assert!(matches!(app.prompt, Prompt::None));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("b.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_l_backlinks_typing_filters_like_go_to_file() {
+    let root = backlink_vault("filter");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    app.open_file(root.join("b.md"));
+    app.handle_key(ctrl('l'));
+    app.handle_key(key(KeyCode::Char('c')));
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("sub/c.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_l_backlinks_lonely_file_sets_status_and_no_popup() {
+    let root = backlink_vault("lonely");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    app.open_file(root.join("d.md"));
+    app.handle_key(ctrl('l'));
+    assert!(matches!(app.prompt, Prompt::None));
+    assert_eq!(app.status.as_deref(), Some("no links to 'd' yet"));
+}
+
+#[test]
+fn ctrl_l_backlinks_no_open_file_sets_status_without_panic() {
+    let root = backlink_vault("nofile");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    app.focus = Focus::Editor; // welcome page covers the editor pane
+    app.handle_key(ctrl('l'));
+    assert!(matches!(app.prompt, Prompt::None));
+    assert_eq!(app.status.as_deref(), Some(NO_FILE_OPEN));
+}
+
+#[cfg(unix)]
+#[test]
+fn ctrl_o_on_an_alias_of_an_open_file_switches_tab_instead_of_duplicating() {
+    // `notes/alias.md` is a symlink to `notes/b.md`; following
+    // `[[alias]]` while b.md is open must land in b.md's tab, not open a
+    // second buffer of the same file (two buffers race on autosave)
+    let root = link_vault("alias-tab", "see [[alias]]\n");
+    std::os::unix::fs::symlink(root.join("notes/b.md"), root.join("notes/alias.md")).unwrap();
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    app.open_file(root.join("notes/b.md"));
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    assert_eq!(app.tabs.len(), 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(app.tabs.len(), 2);
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("notes/b.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_o_heading_link_to_an_unopenable_file_keeps_the_source_cursor() {
+    // `notes/bin` exists but is not UTF-8, so the open fails; the heading
+    // jump must not then run against the still-active source file (which
+    // mentions "intro" in its body) nor replace the open-failed status
+    let root = link_vault("badopen", "intro here, see [[bin#Intro]]\n");
+    fs::write(root.join("notes/bin"), [0xffu8, 0xfe, 0x00, 0x01]).unwrap();
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    let before = app.editor().cursor();
+    app.handle_key(ctrl('o'));
+    assert_eq!(app.tabs.len(), 1);
+    assert_eq!(app.editor().cursor(), before);
+    assert!(
+        app.status
+            .as_deref()
+            .is_some_and(|s| s.starts_with("open failed")),
+        "status: {:?}",
+        app.status
+    );
+}
+
+#[test]
+fn ctrl_o_heading_link_skips_body_text_that_mentions_the_heading() {
+    let root = link_vault("headbody", "see [[b#Second]]\n");
+    fs::write(
+        root.join("notes/b.md"),
+        "# First\nthe second part is below\n## Second\nbody\n",
+    )
+    .unwrap();
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(app.editor().cursor(), (2, 0)); // the `## Second` line
+    assert_eq!(app.status, None);
+}
+
+#[test]
+fn ctrl_o_heading_link_into_a_scrolled_tab_follows_the_cursor_again() {
+    let root = link_vault("headscroll", "see [[b#Target Head]]\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    app.open_file(root.join("notes/b.md"));
+    app.tab_mut().unwrap().follow_cursor = false; // as a wheel scroll leaves it
+    open_at_link(&mut app, &root, "notes/a.md", "[[", 2);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("notes/b.md").as_path())
+    );
+    assert!(app.tab().unwrap().follow_cursor);
+    assert_eq!(app.editor().cursor(), (0, 0));
+}
+
+#[test]
+fn ctrl_o_md_link_with_fragment_opens_and_jumps_to_the_heading() {
+    let root = link_vault("mdfrag", "see [t](../sib/c.md#sea-side)\n");
+    fs::write(root.join("sib/c.md"), "intro\n## Sea Side\nbody\n").unwrap();
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "../sib", 1);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("sib/c.md").as_path())
+    );
+    assert_eq!(app.editor().cursor(), (1, 0));
+}
+
+#[test]
+fn ctrl_o_md_link_decodes_percent_escapes() {
+    let root = link_vault("mdpct", "see [t](my%20note.md)\n");
+    fs::write(root.join("notes/my note.md"), "spaced\n").unwrap();
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "my%20", 1);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("notes/my note.md").as_path())
+    );
+}
+
+#[test]
+fn ctrl_o_fragment_only_link_jumps_within_the_file() {
+    let root = link_vault("mdanchor", "see [t](#below)\nfiller\n## Below\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "#below", 1);
+    app.handle_key(ctrl('o'));
+    assert_eq!(app.tabs.len(), 1);
+    assert_eq!(app.editor().cursor(), (2, 0));
+}
+
+#[test]
+fn ctrl_o_refuses_any_remote_scheme() {
+    let root = link_vault("mdftp", "see [t](ftp://x/y.md)\n");
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    open_at_link(&mut app, &root, "notes/a.md", "ftp://", 1);
+    app.handle_key(ctrl('o'));
+    assert_eq!(
+        app.status.as_deref(),
+        Some("not a local file — ftp://x/y.md")
+    );
+    assert_eq!(app.tabs.len(), 1);
+}
+
+/// The tab-dedup guarantee `open_file` exists to keep: the tree lists a
+/// symlink under the link's own name, so without canonicalizing at that
+/// choke point opening `alias.md` from the tree and then following a
+/// `[[b]]` to its target would leave two buffers on one inode, racing
+/// on autosave.
+#[test]
+#[cfg(unix)]
+fn a_symlink_and_its_target_share_one_tab() {
+    // canonicalized so the expected tab paths match what `open_file`
+    // stores (on macOS `temp_dir()` is `/var` → `/private/var`)
+    let root = fixture("symlink-dedup").canonicalize().unwrap();
+    fs::create_dir_all(root.join("notes")).unwrap();
+    fs::write(root.join("notes/b.md"), "body\n").unwrap();
+    std::os::unix::fs::symlink(root.join("notes/b.md"), root.join("alias.md")).unwrap();
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    // as the tree hands it over: the link's own spelling
+    app.open_file(root.join("alias.md"));
+    assert_eq!(app.tabs.len(), 1);
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("notes/b.md").as_path()),
+        "the tab must be keyed by the file's own spelling"
+    );
+    // as a `[[b]]` follow hands it over: the target's spelling
+    app.open_file(root.join("notes/b.md"));
+    assert_eq!(
+        app.tabs.len(),
+        1,
+        "a symlink and its target must share one tab"
+    );
 }
