@@ -21,6 +21,29 @@ are deferred — not planned at this time.
   `fuzzy::collect_candidates`' 5000-file cap; today the truncation is
   silent, so an over-cap vault can report "no links yet" when links
   exist.
+- [ ] Treat a single-colon scheme as remote in `links::is_remote_url`
+  (`tel:`, `obsidian:`): only `://` and `mailto:` are recognized today,
+  so `Ctrl+O` on one reports `no file '<url>'` instead of saying it is
+  not a local file.
+- [ ] Fold case properly in `links::may_name`: it compares with
+  `eq_ignore_ascii_case` and strips a case-sensitive `.md`, so on a
+  case-insensitive disk a note named `X.MD` gets no backlink from
+  `[[X]]`, and non-ASCII case never matches.
+- [ ] Decide whether the link-follow create offer should survive typing
+  (`src/ui.rs`): it reads `app.status`, which `App::handle_key` clears on
+  every keypress, so the explanation vanishes as soon as the user edits
+  the prefilled name.
+- [ ] Stop `files::move_to` silently replacing a dangling symlink at the
+  destination: its `target.exists()` check follows links, so the
+  `fs::rename` overwrites it (pre-existing, found during the wikilinks
+  review).
+- [ ] Cover the untested branches left by the wikilinks review:
+  `fsutil::canonical`'s failure fallback, `files::selected_dir`'s
+  no-selection case, the `heading is beyond line 65535` status, and
+  `follow_md_url`'s `no file '#'`. Tighten `links.rs`'s public surface
+  while there — `normalize_lexical` and `percent_decode` are `pub` with
+  no caller outside the module, and `MdLink`'s `start`/`end` are never
+  read.
 
 ## Done
 
