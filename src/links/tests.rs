@@ -155,6 +155,10 @@ fn may_name_is_a_cheap_filename_prefilter() {
     // must not veto it
     assert!(may_name("b/", t));
     assert!(may_name("notes/b/", t));
+    // same for a `.` tail: `normalize_lexical` drops the CurDir
+    // component, so `candidates` reaches b.md from these too
+    assert!(may_name("b/.", t));
+    assert!(may_name("b/./", t));
     // a `..` tail names a directory `resolve` can still reach, and the
     // pre-filter cannot tell which: it lets the link through
     assert!(may_name("sub/..", t));

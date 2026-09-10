@@ -491,3 +491,29 @@ fn link_follow_create_offer_shows_its_message_in_the_status_bar() {
         "status message missing:\n{text}"
     );
 }
+
+/// The open-file tree highlight compares against the tab's canonical
+/// path, while the walk lists a symlink under the link's own name — so
+/// a file opened through one matches no row by spelling and the marker
+/// must fall back to canonicalizing the file rows, not to the ancestor
+/// directory hiding the target.
+#[test]
+#[cfg(unix)]
+fn open_marker_finds_the_symlink_row_for_a_canonical_open_path() {
+    let root = std::env::temp_dir().join("mrkdup-ui-symlink-marker");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("sub")).unwrap();
+    fs::write(root.join("sub/b.md"), "body\n").unwrap();
+    let root = root.canonicalize().unwrap();
+    std::os::unix::fs::symlink(root.join("sub/b.md"), root.join("alias.md")).unwrap();
+    let tree = crate::tree::Tree::new(root.clone()).unwrap();
+    // `sub` collapsed: the target has no row of its own
+    let rows = tree.rows();
+    let alias = rows
+        .iter()
+        .position(|r| r.name == "alias.md")
+        .expect("alias.md row");
+    let open = root.join("sub/b.md"); // what `open_file` stores
+    assert!(!rows.iter().any(|r| r.path == open));
+    assert_eq!(open_marker_index(rows, Some(&open)), Some(alias));
+}

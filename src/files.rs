@@ -66,8 +66,10 @@ pub fn rename(
     if target.exists() && !same_file {
         return Err("a file with that name already exists".into());
     }
+    // the tab's spelling of `src`, captured while `src` still resolves
+    let open_as = crate::fsutil::canonical(src.to_path_buf());
     std::fs::rename(src, &target).map_err(|e| format!("rename failed: {e}"))?;
-    redirect(tabs, src, &target);
+    redirect(tabs, &open_as, &target);
     // refresh tracks selection by the old (gone) path, so reselect
     tree.refresh();
     tree.select_path(&target);
@@ -93,8 +95,10 @@ pub fn move_to(
     if target.exists() {
         return Err("a file with that name is already there".into());
     }
+    // the tab's spelling of `src`, captured while `src` still resolves
+    let open_as = crate::fsutil::canonical(src.to_path_buf());
     std::fs::rename(src, &target).map_err(|e| format!("move failed: {e}"))?;
-    redirect(tabs, src, &target);
+    redirect(tabs, &open_as, &target);
     tree.refresh();
     let shown = crate::fuzzy::rel_display(tree.root(), &target);
     Ok(Some(format!("moved to {shown}")))
@@ -110,10 +114,18 @@ pub fn delete(tree: &mut Tree, path: &Path) -> Result<String, String> {
 }
 
 /// Point every tab that has `from` open at `to` instead.
+///
+/// Tab paths are canonical (`App::open_file` stores them that way), so
+/// both sides are canonicalized: `from` by the caller *before* the
+/// move — afterwards the old path no longer resolves — and `to` here,
+/// so a redirected tab stays stored under the spelling `tab_index`
+/// dedups on. Renaming a symlink therefore leaves a tab opened through
+/// it where it is: the link moved, the file it has open did not.
 fn redirect(tabs: &mut [Tab], from: &Path, to: &Path) {
+    let to = crate::fsutil::canonical(to.to_path_buf());
     for tab in tabs {
         if tab.editor.path.as_deref() == Some(from) {
-            tab.editor.path = Some(to.to_path_buf());
+            tab.editor.path = Some(to.clone());
         }
     }
 }

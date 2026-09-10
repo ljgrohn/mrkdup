@@ -122,11 +122,16 @@ pub fn is_text_file(path: &Path) -> bool {
 }
 
 /// The filesystem's own spelling of `path`: symlinks followed, case as
-/// stored on disk. Tabs are keyed by path, so a followed link must open
-/// this spelling — otherwise `[[Note]]` on a case-insensitive disk, or a
-/// symlinked `alias.md`, opens a second buffer of a file that is already
-/// open and the two race on autosave. Falls back to `path` when the
-/// lookup fails (the open then reports its own error).
+/// stored on disk. This is the one spelling tabs are keyed by:
+/// `App::open_file` runs every path it is handed through here, whatever
+/// entry point produced it, so `[[Note]]` on a case-insensitive disk
+/// and a symlinked `alias.md` opened from the tree both land on the
+/// tab that already has that file open instead of a second buffer of
+/// one inode, racing on autosave. Anything that compares a path
+/// against a tab's stored `editor.path` must therefore canonicalize
+/// its own side too (`files::redirect`, `ui::open_marker_index`).
+/// Falls back to `path` when the lookup fails (a missing file: the
+/// open then reports its own error).
 pub(crate) fn canonical(path: std::path::PathBuf) -> std::path::PathBuf {
     std::fs::canonicalize(&path).unwrap_or(path)
 }

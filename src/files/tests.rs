@@ -153,3 +153,40 @@ fn redirect_only_touches_tabs_on_the_old_path() {
     assert_eq!(tabs[0].editor.path.as_deref(), Some(Path::new("/y/a.md")));
     assert_eq!(tabs[1].editor.path.as_deref(), Some(Path::new("/x/b.md")));
 }
+
+/// Tab paths are canonical, so a file opened through a symlink is
+/// stored under the target's spelling: `redirect` must still find it
+/// when the target is renamed, and must leave it alone (still pointing
+/// at live content) when only the link is renamed.
+#[test]
+#[cfg(unix)]
+fn rename_redirects_a_tab_opened_through_a_symlink() {
+    let root = fixture("rename-symlink");
+    std::os::unix::fs::symlink(root.join("a.md"), root.join("alias.md")).unwrap();
+    let mut tree = Tree::new(root.clone()).unwrap();
+    let mut editor = Editor::new();
+    // what `App::open_file` stores for `alias.md`
+    editor.path = Some(crate::fsutil::canonical(root.join("alias.md")));
+    assert_eq!(editor.path.as_deref(), Some(root.join("a.md").as_path()));
+    let mut tabs = vec![Tab::new(editor)];
+
+    // renaming the link moves the link, not the open file: the tab
+    // keeps pointing at content that is still there
+    rename(&mut tree, &mut tabs, &root.join("alias.md"), "alias2.md")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        tabs[0].editor.path.as_deref(),
+        Some(root.join("a.md").as_path())
+    );
+    assert!(tabs[0].editor.path.as_deref().unwrap().is_file());
+
+    // renaming the file the tab actually has open redirects it
+    rename(&mut tree, &mut tabs, &root.join("a.md"), "z.md")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        tabs[0].editor.path.as_deref(),
+        Some(root.join("z.md").as_path())
+    );
+}

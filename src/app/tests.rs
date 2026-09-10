@@ -1885,8 +1885,8 @@ fn wheel_over_a_stale_editor_rect_with_no_file_open_errors() {
     assert_eq!(app.status.as_deref(), Some(NO_FILE));
 }
 
-/// Ctrl+O follow-link fixtures: a vault with a subdirectory,
-/// so sibling-dir vs root fallback resolution is exercisable.
+/// Ctrl+O follow-link fixtures: a vault with a subdirectory, so
+/// sibling-dir vs root fallback resolution is exercisable.
 fn link_vault(tag: &str, a_content: &str) -> std::path::PathBuf {
     let owned = std::env::temp_dir().join(format!("mrkdup-link-{tag}"));
     let _ = fs::remove_dir_all(&owned);
@@ -2123,10 +2123,10 @@ fn ctrl_o_note_name_with_a_dot_opens_its_md_file() {
     );
 }
 
-/// Ctrl+L backlinks fixture: `a.md` and `sub/c.md` link
-/// `[[b]]`, `sub/e.md` reaches it through a path (`[[../b]]`), `d.md`
-/// links elsewhere (so it is lonely), and `b.md` self-links (so the
-/// popup must exclude the current file).
+/// Ctrl+L backlinks fixture: `a.md` and `sub/c.md` link `[[b]]`,
+/// `sub/e.md` reaches it through a path (`[[../b]]`), `d.md` links
+/// elsewhere (so it is lonely), and `b.md` self-links (so the popup
+/// must exclude the current file).
 fn backlink_vault(tag: &str) -> std::path::PathBuf {
     let owned = std::env::temp_dir().join(format!("mrkdup-backlink-{tag}"));
     let _ = fs::remove_dir_all(&owned);
@@ -2359,4 +2359,36 @@ fn ctrl_o_refuses_any_remote_scheme() {
         Some("not a local file — ftp://x/y.md")
     );
     assert_eq!(app.tabs.len(), 1);
+}
+
+/// The tab-dedup guarantee `open_file` exists to keep: the tree lists a
+/// symlink under the link's own name, so without canonicalizing at that
+/// choke point opening `alias.md` from the tree and then following a
+/// `[[b]]` to its target would leave two buffers on one inode, racing
+/// on autosave.
+#[test]
+#[cfg(unix)]
+fn a_symlink_and_its_target_share_one_tab() {
+    // canonicalized so the expected tab paths match what `open_file`
+    // stores (on macOS `temp_dir()` is `/var` → `/private/var`)
+    let root = fixture("symlink-dedup").canonicalize().unwrap();
+    fs::create_dir_all(root.join("notes")).unwrap();
+    fs::write(root.join("notes/b.md"), "body\n").unwrap();
+    std::os::unix::fs::symlink(root.join("notes/b.md"), root.join("alias.md")).unwrap();
+    let mut app = App::new(root.clone(), Config::default()).unwrap();
+    // as the tree hands it over: the link's own spelling
+    app.open_file(root.join("alias.md"));
+    assert_eq!(app.tabs.len(), 1);
+    assert_eq!(
+        app.tab().unwrap().editor.path.as_deref(),
+        Some(root.join("notes/b.md").as_path()),
+        "the tab must be keyed by the file's own spelling"
+    );
+    // as a `[[b]]` follow hands it over: the target's spelling
+    app.open_file(root.join("notes/b.md"));
+    assert_eq!(
+        app.tabs.len(),
+        1,
+        "a symlink and its target must share one tab"
+    );
 }

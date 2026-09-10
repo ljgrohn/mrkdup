@@ -340,6 +340,16 @@ fn open_marker_index(rows: &[crate::tree::Row], open: Option<&std::path::Path>) 
     if let Some(i) = rows.iter().position(|r| r.path == open) {
         return Some(i);
     }
+    // `open` is canonical (`App::open_file`) while the tree walk lists a
+    // symlink under the link's own name, so a file opened through one
+    // matches no row by spelling: canonicalize the file rows too. Costs
+    // one stat per file row, and only when the cheap pass above missed.
+    if let Some(i) = rows
+        .iter()
+        .position(|r| !r.is_dir && crate::fsutil::canonical(r.path.clone()) == open)
+    {
+        return Some(i);
+    }
     rows.iter()
         .enumerate()
         .filter(|(_, r)| r.is_dir && open.starts_with(&r.path))

@@ -741,7 +741,10 @@ impl App {
         match crate::files::delete(&mut self.tree, &path) {
             Ok(status) => {
                 self.status = Some(status);
-                // the file is gone: drop its tab without saving
+                // the file is gone: drop its tab without saving.
+                // `path` is a tree row, so already canonical unless it
+                // named a symlink — and deleting a symlink leaves the
+                // tab's real file alone, so missing there is correct.
                 if let Some(i) = self.tab_index(&path) {
                     self.remove_tab(i);
                 }
@@ -767,7 +770,18 @@ impl App {
     /// tab being left autosaves on the way out. Returns whether `path`
     /// is now the active tab (false when the read failed; `status` then
     /// says why).
+    ///
+    /// `path` is canonicalized on the way in, so every entry point —
+    /// the tree, the go-to-file and backlinks pickers, a link follow,
+    /// the CLI argument — agrees on one spelling and `tab_index` can
+    /// key tabs by plain path equality. Without it a symlinked
+    /// `alias.md` opened from the tree and a `[[b]]` resolving to its
+    /// target would be two buffers on one inode, racing on autosave.
+    /// Everything downstream may therefore assume `editor.path` is the
+    /// filesystem's own spelling (see `files::redirect`,
+    /// `ui::open_marker_index`).
     fn open_file(&mut self, path: PathBuf) -> bool {
+        let path = crate::fsutil::canonical(path);
         if let Some(i) = self.tab_index(&path) {
             self.activate_tab(i);
             return true;
@@ -1324,7 +1338,7 @@ impl App {
     ) {
         let exists = |p: &std::path::Path| p.is_file();
         if let Some(path) = crate::links::resolve(target, file_dir, root, &exists) {
-            if self.open_file(crate::fsutil::canonical(path)) {
+            if self.open_file(path) {
                 if let Some(h) = heading {
                     self.jump_to_heading(h);
                 }
@@ -1368,7 +1382,7 @@ impl App {
         } else {
             let exists = |p: &std::path::Path| p.is_file();
             match crate::links::resolve(&path, file_dir, root, &exists) {
-                Some(p) => self.open_file(crate::fsutil::canonical(p)),
+                Some(p) => self.open_file(p),
                 None => {
                     self.status = Some(format!("no file '{url}'"));
                     false

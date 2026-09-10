@@ -243,24 +243,30 @@ pub fn create_target(target: &str, file_dir: &Path, root: &Path) -> Option<PathB
 /// Only ever a pre-filter, so it errs permissive: a false positive
 /// costs one wasted `resolve` (which, with the path equality, still
 /// decides the answer) while a false negative would silently lose a
-/// real backlink. So the segment compared is the last *non-empty* one
-/// — `[[b/]]` reaches `b.md`, since `candidates` normalizes the empty
-/// trailing component away — and a `..` tail, which names a directory
-/// this function cannot put a name to, is let through.
+/// real backlink. So the segment compared is the last `Normal`
+/// component the way `Path` sees it — matching `normalize_lexical`,
+/// which drops the empty and `.` components `candidates` would
+/// otherwise trip over, so `[[b/]]` and `[[b/.]]` both reach `b.md` —
+/// and a `..` tail (or nothing nameable at all), which names a
+/// directory this function cannot put a name to, is let through.
 fn may_name(link_target: &str, target: &Path) -> bool {
+    use std::path::Component;
     let Some(name) = target.file_name().and_then(|n| n.to_str()) else {
         return false;
     };
-    let Some(last) = link_target
-        .trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .filter(|s| !s.is_empty())
-    else {
-        return false;
+    let mut last = None;
+    for c in Path::new(link_target).components() {
+        match c {
+            Component::Normal(s) => last = Some(s),
+            // a `..` tail names a directory, not a file: unknowable here
+            Component::ParentDir => last = None,
+            _ => {}
+        }
+    }
+    let Some(last) = last.and_then(|s| s.to_str()) else {
+        return true; // nothing nameable: stay permissive
     };
-    last == ".."
-        || last.eq_ignore_ascii_case(name)
+    last.eq_ignore_ascii_case(name)
         || name
             .strip_suffix(".md")
             .is_some_and(|stem| last.eq_ignore_ascii_case(stem))
@@ -275,11 +281,17 @@ fn may_name(link_target: &str, target: &Path) -> bool {
 /// same ignore rules, same 5000-file cap — skips `target` itself, and
 /// returns (root-relative display, absolute path) in the picker's order.
 /// Files that fail to read as UTF-8 are skipped.
+///
+/// `target` is canonicalized on the way in so any spelling of the same
+/// file answers the same — the comparison below is against the on-disk
+/// spelling of each resolved link, which an un-canonical `target` would
+/// never equal, silently reporting no backlinks at all.
 pub(crate) fn backlinks(root: &Path, show_hidden: bool, target: &Path) -> Vec<(String, PathBuf)> {
+    let target = crate::fsutil::canonical(target.to_path_buf());
     let exists = |p: &Path| p.is_file();
     crate::fuzzy::collect_candidates(root, show_hidden)
         .into_iter()
-        .filter(|(_, path)| path != target)
+        .filter(|(_, path)| path != &target)
         .filter(|(_, path)| {
             let Ok(content) = std::fs::read_to_string(path) else {
                 return false;
@@ -289,7 +301,7 @@ pub(crate) fn backlinks(root: &Path, show_hidden: bool, target: &Path) -> Vec<(S
             }
             let dir = path.parent().unwrap_or(root);
             content.lines().flat_map(wikilinks).any(|w| {
-                may_name(&w.target, target)
+                may_name(&w.target, &target)
                     && resolve(&w.target, dir, root, &exists)
                         .map(crate::fsutil::canonical)
                         .is_some_and(|p| p == target)
